@@ -1,0 +1,5 @@
+{
+  "name": "Aplikasi Keuangan _ Realtime",
+  "description": "A comprehensive financial management application built with React and TypeScript, using Supabase for data persistence. It includes features for transaction management, general ledger, asset tracking, bank reconciliation, and financial reporting.",
+  "requestFramePermissions": []
+}

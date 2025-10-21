@@ -1,0 +1,306 @@
+import React, { createContext, useContext, useState, useEffect } from 'react';
+import type { Account, Transaction, Asset, CompanySettings, TaxSettings, JournalEntry } from '../types';
+import { defaultAccounts, defaultCompanySettings, defaultTaxSettings, getTodayDateString } from '../utils/helpers';
+import { supabase } from '../services/supabase';
+import { useAuth } from './AuthContext';
+
+type NewTransactionData = {
+    transaction: Omit<Transaction, 'id' | 'entries'>;
+    entries: Omit<JournalEntry, 'id' | 'transaction_id'>[];
+};
+
+interface DataContextType {
+    accounts: Account[];
+    transactions: Transaction[];
+    assets: Asset[];
+    companySettings: CompanySettings;
+    taxSettings: TaxSettings;
+    loading: boolean;
+    error: string | null;
+    transactionCount: number;
+    accountCount: number;
+    assetCount: number;
+    addAccount: (account: Omit<Account, 'id' | 'balance'> & { balance?: number }) => Promise<void>;
+    addAccountsBatch: (accounts: (Omit<Account, 'id' | 'balance'> & { balance?: number })[]) => Promise<Account[]>;
+    updateAccount: (code: string, updates: Partial<Account>) => Promise<void>;
+    deleteAccount: (code: string) => Promise<void>;
+    addTransaction: (transaction: Omit<Transaction, 'id' | 'entries'>, entries: Omit<JournalEntry, 'id'|'transaction_id'>[]) => Promise<Transaction>;
+    addTransactionsBatch: (transactionsData: NewTransactionData[]) => Promise<Transaction[]>;
+    updateTransaction: (id: string, updates: Partial<Omit<Transaction, 'id' | 'entries'>>) => Promise<void>;
+    deleteTransaction: (id: string) => Promise<void>;
+    addAsset: (asset: Omit<Asset, 'id'>) => Promise<Asset>;
+    updateAsset: (id: string, updates: Partial<Asset>) => Promise<void>;
+    deleteAsset: (id: string) => Promise<void>;
+    saveCompanySettings: (settings: CompanySettings) => Promise<void>;
+    saveTaxSettings: (settings: TaxSettings) => Promise<void>;
+}
+
+const DataContext = createContext<DataContextType | undefined>(undefined);
+
+export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+    const { session, loading: authLoading } = useAuth();
+    const [accounts, setAccounts] = useState<Account[]>([]);
+    const [transactions, setTransactions] = useState<Transaction[]>([]);
+    const [assets, setAssets] = useState<Asset[]>([]);
+    const [companySettings, setCompanySettings] = useState<CompanySettings>(defaultCompanySettings);
+    const [taxSettings, setTaxSettings] = useState<TaxSettings>(defaultTaxSettings);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+
+    const clearState = () => {
+        setAccounts([]);
+        setTransactions([]);
+        setAssets([]);
+        setCompanySettings(defaultCompanySettings);
+        setTaxSettings(defaultTaxSettings);
+    };
+
+    const addAccountsBatch = async (accountsToAdd: (Omit<Account, 'id' | 'balance'> & { balance?: number })[]) => {
+        const accountsToInsert = accountsToAdd.map(({ balance, ...acc }) => ({...acc, balance: 0}));
+        const { data, error } = await supabase.from('accounts').insert(accountsToInsert).select();
+        if (error) throw error;
+        setAccounts(prev => [...prev, ...data].sort((a, b) => a.code.localeCompare(b.code)));
+        return data;
+    };
+
+    useEffect(() => {
+        // Tunggu hingga status autentikasi selesai dimuat.
+        if (authLoading) {
+            setLoading(true);
+            return;
+        }
+
+        // Jika tidak ada sesi (pengguna tidak login), bersihkan data dan berhenti memuat.
+        if (!session) {
+            clearState();
+            setLoading(false);
+            return;
+        }
+
+        // Jika ada sesi, lanjutkan untuk mengambil data keuangan.
+        const fetchData = async () => {
+            setLoading(true);
+            setError(null);
+            try {
+                const accountsPromise = supabase.from('accounts').select('*').order('code');
+                const transactionsPromise = supabase.from('transactions').select('*, journal_entries(*)').order('date', { ascending: false });
+                const assetsPromise = supabase.from('assets').select('*').order('date', { ascending: false });
+                const companySettingsPromise = supabase.from('company_settings').select('*').limit(1).single();
+                const taxSettingsPromise = supabase.from('tax_settings').select('*').limit(1).single();
+
+                let [
+                    { data: accountsData, error: accountsError },
+                    { data: transactionsData, error: transactionsError },
+                    { data: assetsData, error: assetsError },
+                    { data: companySettingsData, error: companySettingsError },
+                    { data: taxSettingsData, error: taxSettingsError },
+                ] = await Promise.all([accountsPromise, transactionsPromise, assetsPromise, companySettingsPromise, taxSettingsPromise]);
+
+                if (accountsError) throw accountsError;
+
+                if (!accountsData || accountsData.length === 0) {
+                    console.log("Tidak ada akun ditemukan, mengisi database dengan data default...");
+                    const newAccounts = await addAccountsBatch(defaultAccounts);
+                    accountsData = newAccounts;
+                }
+                
+                if (transactionsError) throw transactionsError;
+                if (assetsError) throw assetsError;
+                if (companySettingsError && companySettingsError.code !== 'PGRST116') throw companySettingsError;
+                if (taxSettingsError && taxSettingsError.code !== 'PGRST116') throw taxSettingsError;
+
+                const formattedTransactions = transactionsData?.map(tx => ({ ...tx, entries: tx.journal_entries || [] })) || [];
+
+                setAccounts(accountsData || []);
+                setTransactions(formattedTransactions);
+                setAssets(assetsData || []);
+                if (companySettingsData) setCompanySettings(companySettingsData);
+                if (taxSettingsData) setTaxSettings(taxSettingsData);
+
+            } catch (err: any) {
+                console.error("Gagal mengambil data awal:", err);
+                setError(`Gagal memuat data dari database: ${err.message}`);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchData();
+    }, [session, authLoading]);
+
+    const transactionCount = transactions.length;
+    const accountCount = accounts.length;
+    const assetCount = assets.length;
+
+    const addAccount = async (account: Omit<Account, 'id' | 'balance'> & { balance?: number }) => {
+        const openingBalance = account.balance || 0;
+        const { balance, ...accountData } = account;
+        const newAccounts = await addAccountsBatch([accountData]);
+        
+        if (openingBalance !== 0 && newAccounts.length > 0) {
+            const newAccount = newAccounts[0];
+            const isDebitNormal = newAccount.type === 'Aset' || newAccount.type === 'Beban';
+            
+            await addTransaction(
+                {
+                    date: getTodayDateString(),
+                    description: `Saldo Awal untuk Akun ${newAccount.code}`,
+                    ref: 'SALDO-AWAL',
+                },
+                [
+                    { account_code: newAccount.code, debit: isDebitNormal ? openingBalance : 0, credit: !isDebitNormal ? openingBalance : 0 },
+                    { account_code: '3999', debit: !isDebitNormal ? openingBalance : 0, credit: isDebitNormal ? openingBalance : 0 }
+                ]
+            );
+        }
+    };
+    
+    const updateAccount = async (code: string, updates: Partial<Account>) => {
+        const { data, error } = await supabase.from('accounts').update(updates).eq('code', code).select().single();
+        if (error) throw error;
+        setAccounts(prev => prev.map(acc => acc.code === code ? data : acc));
+    };
+    
+    const deleteAccount = async (code: string) => {
+        const { error } = await supabase.from('accounts').delete().eq('code', code);
+        if (error) throw error;
+        setAccounts(prev => prev.filter(acc => acc.code !== code));
+    };
+
+    const addTransaction = async (transaction: Omit<Transaction, 'id' | 'entries'>, entries: Omit<JournalEntry, 'id'|'transaction_id'>[]): Promise<Transaction> => {
+       const [newTx] = await addTransactionsBatch([{ transaction, entries }]);
+       return newTx;
+    };
+    
+    const addTransactionsBatch = async (transactionsData: NewTransactionData[]): Promise<Transaction[]> => {
+        const newTransactions: Transaction[] = [];
+
+        for (const { transaction, entries } of transactionsData) {
+            const { data: txData, error: txError } = await supabase.from('transactions').insert(transaction).select().single();
+            if (txError) throw txError;
+            
+            const entriesWithTxId = entries.map(e => ({ ...e, transaction_id: txData.id }));
+            const { data: entriesData, error: entriesError } = await supabase.from('journal_entries').insert(entriesWithTxId).select();
+            
+            if (entriesError) {
+                await supabase.from('transactions').delete().eq('id', txData.id);
+                throw entriesError;
+            }
+            
+            const accountUpdates = new Map<string, number>();
+            entries.forEach(entry => {
+                const currentChange = accountUpdates.get(entry.account_code) || 0;
+                const account = accounts.find(a => a.code === entry.account_code);
+                if (!account) return;
+                
+                const isContraAsset = account.type === 'Aset' && account.name.toLowerCase().includes('akumulasi penyusutan');
+                let change = (account.type === 'Aset' || account.type === 'Beban') && !isContraAsset
+                    ? entry.debit - entry.credit
+                    : entry.credit - entry.debit;
+                
+                accountUpdates.set(entry.account_code, currentChange + change);
+            });
+
+            const updatePromises = Array.from(accountUpdates.entries()).map(([code, balanceChange]) => 
+                supabase.rpc('update_account_balance', { p_code: code, p_amount: balanceChange })
+            );
+            
+            const results = await Promise.all(updatePromises);
+            results.forEach(res => { if (res.error) console.error(`Gagal memperbarui saldo:`, res.error); });
+
+            const newFullTransaction = { ...txData, entries: entriesData || [] };
+            newTransactions.push(newFullTransaction);
+        }
+
+        const { data: updatedAccountsData } = await supabase.from('accounts').select('*').order('code');
+        setAccounts(updatedAccountsData || []);
+        setTransactions(prev => [...newTransactions, ...prev].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+        
+        return newTransactions;
+    };
+
+    const updateTransaction = async (id: string, updates: Partial<Omit<Transaction, 'id' | 'entries'>>) => {
+        const { data, error } = await supabase.from('transactions').update(updates).eq('id', id).select().single();
+        if (error) throw error;
+        setTransactions(prev => prev.map(tx => (tx.id === id ? { ...tx, ...data } : tx)));
+    };
+
+    const deleteTransaction = async (id: string) => {
+        const transactionToDelete = transactions.find(t => t.id === id);
+        if (!transactionToDelete) throw new Error("Transaksi tidak ditemukan");
+
+        const accountUpdates = new Map<string, number>();
+        transactionToDelete.entries.forEach(entry => {
+            const currentChange = accountUpdates.get(entry.account_code) || 0;
+            const account = accounts.find(a => a.code === entry.account_code);
+            if (!account) return;
+            const isContraAsset = account.type === 'Aset' && account.name.toLowerCase().includes('akumulasi penyusutan');
+            let change = (account.type === 'Aset' || account.type === 'Beban') && !isContraAsset
+                ? entry.debit - entry.credit
+                : entry.credit - entry.debit;
+            accountUpdates.set(entry.account_code, currentChange - change);
+        });
+        
+        const updatePromises = Array.from(accountUpdates.entries()).map(([code, balanceChange]) => 
+            supabase.rpc('update_account_balance', { p_code: code, p_amount: balanceChange })
+        );
+        await Promise.all(updatePromises);
+        
+        const { error: txError } = await supabase.from('transactions').delete().eq('id', id);
+        if(txError) throw txError;
+
+        setTransactions(prev => prev.filter(tx => tx.id !== id));
+        const { data: updatedAccountsData } = await supabase.from('accounts').select('*').order('code');
+        setAccounts(updatedAccountsData || []);
+    };
+
+    const addAsset = async (asset: Omit<Asset, 'id'>): Promise<Asset> => {
+        const { data, error } = await supabase.from('assets').insert(asset).select().single();
+        if (error) throw error;
+        setAssets(prev => [data, ...prev].sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+        return data;
+    };
+    
+    const updateAsset = async (id: string, updates: Partial<Asset>) => {
+        const { data, error } = await supabase.from('assets').update(updates).eq('id', id).select().single();
+        if (error) throw error;
+        setAssets(prev => prev.map(a => (a.id === id ? data : a)));
+    };
+    
+    const deleteAsset = async (id: string) => {
+        const { error } = await supabase.from('assets').delete().eq('id', id);
+        if (error) throw error;
+        setAssets(prev => prev.filter(a => a.id !== id));
+    };
+
+    const saveCompanySettings = async (settings: CompanySettings) => {
+        const { data, error } = await supabase.from('company_settings').upsert({ ...settings, id: 1 }).select().single();
+        if (error) throw error;
+        setCompanySettings(data);
+    };
+
+    const saveTaxSettings = async (settings: TaxSettings) => {
+        const { data, error } = await supabase.from('tax_settings').upsert({ ...settings, id: 1 }).select().single();
+        if (error) throw error;
+        setTaxSettings(data);
+    };
+
+    const value: DataContextType = {
+        accounts, transactions, assets, companySettings, taxSettings,
+        loading, error, transactionCount, accountCount, assetCount,
+        addAccount, addAccountsBatch, updateAccount, deleteAccount,
+        addTransaction, addTransactionsBatch, updateTransaction, deleteTransaction,
+        addAsset, updateAsset, deleteAsset,
+        saveCompanySettings, saveTaxSettings
+    };
+
+    return <DataContext.Provider value={value}>{children}</DataContext.Provider>;
+};
+
+export const useData = () => {
+    const context = useContext(DataContext);
+    if (context === undefined) {
+        throw new Error('useData must be used within a DataProvider');
+    }
+    return context;
+};

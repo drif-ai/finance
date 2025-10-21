@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FinanceFlow Pro</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%236366f1'/%3E%3Ctext x='50' y='50' font-family='Arial, sans-serif' font-size='50' fill='white' text-anchor='middle' dy='.3em' font-weight='bold'%3EFF%3C/text%3E%3C/svg%3E" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#6366f1',
+                        secondary: '#8b5cf6',
+                        accent: '#06b6d4',
+                        dark: '#0f172a',
+                        'dark-light': '#1e293b'
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .glass-effect {
+            background: rgba(30, 41, 59, 0.5); /* Adjusted for dark theme */
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .card-hover {
+            transition: all 0.3s ease;
+        }
+        .card-hover:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            border-color: rgba(99, 102, 241, 0.5);
+        }
+        /* For custom scrollbars */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1e293b;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #4f46e5;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #6366f1;
+        }
+
+        /* Print-specific styles */
+        @media print {
+            body {
+                background: #fff !important;
+                color: #000 !important;
+                font-family: Arial, sans-serif;
+                font-size: 10pt;
+            }
+            header, .no-print {
+                display: none !important;
+            }
+            main {
+              padding: 0 !important;
+              max-width: 100% !important;
+            }
+            .printable-area {
+                display: block !important;
+                visibility: visible !important;
+                position: absolute;
+                top: 20px;
+                left: 20px;
+                right: 20px;
+            }
+            .print-header {
+                display: block !important;
+                text-align: center;
+                margin-bottom: 2rem;
+                border-bottom: 2px solid #000;
+                padding-bottom: 1rem;
+            }
+             .print-header h1 {
+                font-size: 1.5rem;
+                font-weight: bold;
+                color: #000;
+             }
+             .print-header h2 {
+                font-size: 1.2rem;
+                color: #000;
+             }
+             .print-header p {
+                font-size: 0.9rem;
+                color: #333;
+             }
+            .printable-area .card-hover {
+              background: none !important;
+              backdrop-filter: none !important;
+              border: none !important;
+              box-shadow: none !important;
+              padding: 0 !important;
+            }
+            .printable-area h3, .printable-area h4 {
+                color: #000 !important;
+                border-color: #ccc !important;
+            }
+            .printable-area span, .printable-area p {
+                color: #000 !important;
+            }
+            .printable-area .grid {
+                display: block !important;
+            }
+             .printable-area .lg\:grid-cols-2 > div {
+                width: 100%;
+                margin-bottom: 2rem;
+            }
+            .printable-area .font-mono {
+                font-family: 'Courier New', Courier, monospace;
+            }
+            .printable-area div[class*="bg-slate"] {
+                background: none !important;
+            }
+             .printable-area div[class*="border-t"] {
+                border-color: #000 !important;
+            }
+            .printable-area div[class*="border-b"] {
+                border-color: #eee !important;
+            }
+        }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react/": "https://aistudiocdn.com/react@^19.1.1/",
+    "react": "https://aistudiocdn.com/react@^19.1.1",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.1.1/",
+    "xlsx": "https://aistudiocdn.com/xlsx@^0.18.5",
+    "@supabase/supabase-js": "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm",
+    "uuid": "https://aistudiocdn.com/uuid@^13.0.0"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+<link rel="manifest" href="/manifest.json">
+</head>
+  <body class="bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 min-h-screen text-white">
+    <div id="root"></div>
+    <script type="module" src="/src/index.tsx"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/service-worker.js')
+            .then(() => console.log('ServiceWorker registered successfully'))
+            .catch(err => console.error('ServiceWorker registration failed:', err));
+        }
+    </script>
+</body>
+</html>
