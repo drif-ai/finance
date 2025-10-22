@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import type { Account, Transaction, Asset, CompanySettings, TaxSettings, JournalEntry } from '../types';
-import { defaultAccounts, defaultCompanySettings, defaultTaxSettings, getTodayDateString } from '../utils/helpers';
+import { defaultCompanySettings, defaultTaxSettings, getTodayDateString, CACHE_KEYS, loadFromCache, saveToCache } from '../utils/helpers';
 import { supabase } from '../services/supabase';
 import { useAuth } from './AuthContext';
 
@@ -39,89 +39,107 @@ const DataContext = createContext<DataContextType | undefined>(undefined);
 
 export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const { session, loading: authLoading } = useAuth();
+    
+    // Initialize state as empty. Data will be loaded from cache inside useEffect.
     const [accounts, setAccounts] = useState<Account[]>([]);
     const [transactions, setTransactions] = useState<Transaction[]>([]);
     const [assets, setAssets] = useState<Asset[]>([]);
     const [companySettings, setCompanySettings] = useState<CompanySettings>(defaultCompanySettings);
     const [taxSettings, setTaxSettings] = useState<TaxSettings>(defaultTaxSettings);
+    
+    // 'loading' now represents background syncing activity.
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
-    const clearState = () => {
-        setAccounts([]);
-        setTransactions([]);
-        setAssets([]);
-        setCompanySettings(defaultCompanySettings);
-        setTaxSettings(defaultTaxSettings);
-    };
-
-    const addAccountsBatch = async (accountsToAdd: (Omit<Account, 'id' | 'balance'> & { balance?: number })[]) => {
-        const accountsToInsert = accountsToAdd.map(({ balance, ...acc }) => ({...acc, balance: 0}));
-        const { data, error } = await supabase.from('accounts').insert(accountsToInsert).select();
-        if (error) throw error;
-        setAccounts(prev => [...prev, ...data].sort((a, b) => a.code.localeCompare(b.code)));
-        return data;
+    const getCacheKey = (baseKey: string) => {
+        const userId = session?.user?.id;
+        if (!userId) return null;
+        return `${baseKey}_${userId}`;
     };
 
     useEffect(() => {
-        // Tunggu hingga status autentikasi selesai dimuat.
         if (authLoading) {
             setLoading(true);
             return;
         }
 
-        // Jika tidak ada sesi (pengguna tidak login), bersihkan data dan berhenti memuat.
         if (!session) {
-            clearState();
+            // Clear state when user logs out.
+            setAccounts([]);
+            setTransactions([]);
+            setAssets([]);
+            setCompanySettings(defaultCompanySettings);
+            setTaxSettings(defaultTaxSettings);
             setLoading(false);
             return;
         }
 
-        // Jika ada sesi, lanjutkan untuk mengambil data keuangan.
+        const userId = session.user.id;
+
+        // --- STALE ---
+        // Load data from user-specific cache immediately for an instant UI response.
+        setAccounts(loadFromCache(`${CACHE_KEYS.ACCOUNTS}_${userId}`, []));
+        setTransactions(loadFromCache(`${CACHE_KEYS.TRANSACTIONS}_${userId}`, []));
+        setAssets(loadFromCache(`${CACHE_KEYS.ASSETS}_${userId}`, []));
+        setCompanySettings(loadFromCache(`${CACHE_KEYS.COMPANY_SETTINGS}_${userId}`, defaultCompanySettings));
+        setTaxSettings(loadFromCache(`${CACHE_KEYS.TAX_SETTINGS}_${userId}`, defaultTaxSettings));
+        setLoading(false); // Stop initial loading, UI is now interactive with cached data.
+
+        // --- REVALIDATE ---
+        // Fetch fresh data from Supabase in the background.
         const fetchData = async () => {
-            setLoading(true);
+            setLoading(true); // Indicate background sync has started.
             setError(null);
             try {
                 const accountsPromise = supabase.from('accounts').select('*').order('code');
                 const transactionsPromise = supabase.from('transactions').select('*, journal_entries(*)').order('date', { ascending: false });
                 const assetsPromise = supabase.from('assets').select('*').order('date', { ascending: false });
-                const companySettingsPromise = supabase.from('company_settings').select('*').limit(1).single();
-                const taxSettingsPromise = supabase.from('tax_settings').select('*').limit(1).single();
+                const companySettingsPromise = supabase.from('company_settings').select('*').limit(1);
+                const taxSettingsPromise = supabase.from('tax_settings').select('*').limit(1);
 
-                let [
+                const [
                     { data: accountsData, error: accountsError },
                     { data: transactionsData, error: transactionsError },
                     { data: assetsData, error: assetsError },
-                    { data: companySettingsData, error: companySettingsError },
-                    { data: taxSettingsData, error: taxSettingsError },
+                    { data: companySettingsDataArray, error: companySettingsError },
+                    { data: taxSettingsDataArray, error: taxSettingsError },
                 ] = await Promise.all([accountsPromise, transactionsPromise, assetsPromise, companySettingsPromise, taxSettingsPromise]);
 
                 if (accountsError) throw accountsError;
-
-                if (!accountsData || accountsData.length === 0) {
-                    console.log("Tidak ada akun ditemukan, mengisi database dengan data default...");
-                    const newAccounts = await addAccountsBatch(defaultAccounts);
-                    accountsData = newAccounts;
-                }
-                
                 if (transactionsError) throw transactionsError;
                 if (assetsError) throw assetsError;
-                if (companySettingsError && companySettingsError.code !== 'PGRST116') throw companySettingsError;
-                if (taxSettingsError && taxSettingsError.code !== 'PGRST116') throw taxSettingsError;
+                if (companySettingsError) throw companySettingsError;
+                if (taxSettingsError) throw taxSettingsError;
 
                 const formattedTransactions = transactionsData?.map(tx => ({ ...tx, entries: tx.journal_entries || [] })) || [];
+                
+                const companySettingsData = companySettingsDataArray?.[0];
+                const taxSettingsData = taxSettingsDataArray?.[0];
 
+                // Update state and user-specific cache with fresh data.
                 setAccounts(accountsData || []);
+                saveToCache(`${CACHE_KEYS.ACCOUNTS}_${userId}`, accountsData || []);
+                
                 setTransactions(formattedTransactions);
+                saveToCache(`${CACHE_KEYS.TRANSACTIONS}_${userId}`, formattedTransactions);
+
                 setAssets(assetsData || []);
-                if (companySettingsData) setCompanySettings(companySettingsData);
-                if (taxSettingsData) setTaxSettings(taxSettingsData);
+                saveToCache(`${CACHE_KEYS.ASSETS}_${userId}`, assetsData || []);
+
+                if (companySettingsData) {
+                    setCompanySettings(companySettingsData);
+                    saveToCache(`${CACHE_KEYS.COMPANY_SETTINGS}_${userId}`, companySettingsData);
+                }
+                if (taxSettingsData) {
+                    setTaxSettings(taxSettingsData);
+                    saveToCache(`${CACHE_KEYS.TAX_SETTINGS}_${userId}`, taxSettingsData);
+                }
 
             } catch (err: any) {
-                console.error("Gagal mengambil data awal:", err);
-                setError(`Gagal memuat data dari database: ${err.message}`);
+                console.error("Gagal mengambil data sinkronisasi:", err);
+                setError(`Gagal sinkronisasi data: ${err.message}`);
             } finally {
-                setLoading(false);
+                setLoading(false); // Background sync finished.
             }
         };
 
@@ -131,6 +149,21 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const transactionCount = transactions.length;
     const accountCount = accounts.length;
     const assetCount = assets.length;
+    
+    const addAccountsBatch = async (accountsToAdd: (Omit<Account, 'id' | 'balance'> & { balance?: number })[]) => {
+        const key = getCacheKey(CACHE_KEYS.ACCOUNTS);
+        if (!key) throw new Error("Pengguna tidak login");
+
+        const accountsToInsert = accountsToAdd.map(({ balance, ...acc }) => ({...acc, balance: 0}));
+        const { data, error } = await supabase.from('accounts').insert(accountsToInsert).select();
+        if (error) throw error;
+        
+        const updatedAccounts = [...accounts, ...data].sort((a, b) => a.code.localeCompare(b.code));
+        setAccounts(updatedAccounts);
+        saveToCache(key, updatedAccounts);
+        
+        return data;
+    };
 
     const addAccount = async (account: Omit<Account, 'id' | 'balance'> & { balance?: number }) => {
         const openingBalance = account.balance || 0;
@@ -156,15 +189,25 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
     
     const updateAccount = async (code: string, updates: Partial<Account>) => {
+        const key = getCacheKey(CACHE_KEYS.ACCOUNTS);
+        if (!key) throw new Error("Pengguna tidak login");
+        
         const { data, error } = await supabase.from('accounts').update(updates).eq('code', code).select().single();
         if (error) throw error;
-        setAccounts(prev => prev.map(acc => acc.code === code ? data : acc));
+        const updatedAccounts = accounts.map(acc => acc.code === code ? data : acc);
+        setAccounts(updatedAccounts);
+        saveToCache(key, updatedAccounts);
     };
     
     const deleteAccount = async (code: string) => {
+        const key = getCacheKey(CACHE_KEYS.ACCOUNTS);
+        if (!key) throw new Error("Pengguna tidak login");
+
         const { error } = await supabase.from('accounts').delete().eq('code', code);
         if (error) throw error;
-        setAccounts(prev => prev.filter(acc => acc.code !== code));
+        const updatedAccounts = accounts.filter(acc => acc.code !== code);
+        setAccounts(updatedAccounts);
+        saveToCache(key, updatedAccounts);
     };
 
     const addTransaction = async (transaction: Omit<Transaction, 'id' | 'entries'>, entries: Omit<JournalEntry, 'id'|'transaction_id'>[]): Promise<Transaction> => {
@@ -173,7 +216,11 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
     
     const addTransactionsBatch = async (transactionsData: NewTransactionData[]): Promise<Transaction[]> => {
-        const newTransactions: Transaction[] = [];
+        const accountsKey = getCacheKey(CACHE_KEYS.ACCOUNTS);
+        const transactionsKey = getCacheKey(CACHE_KEYS.TRANSACTIONS);
+        if (!accountsKey || !transactionsKey) throw new Error("Pengguna tidak login");
+
+        const newTransactionsResult: Transaction[] = [];
 
         for (const { transaction, entries } of transactionsData) {
             const { data: txData, error: txError } = await supabase.from('transactions').insert(transaction).select().single();
@@ -205,27 +252,40 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 supabase.rpc('update_account_balance', { p_code: code, p_amount: balanceChange })
             );
             
-            const results = await Promise.all(updatePromises);
-            results.forEach(res => { if (res.error) console.error(`Gagal memperbarui saldo:`, res.error); });
+            await Promise.all(updatePromises);
 
             const newFullTransaction = { ...txData, entries: entriesData || [] };
-            newTransactions.push(newFullTransaction);
+            newTransactionsResult.push(newFullTransaction);
         }
 
         const { data: updatedAccountsData } = await supabase.from('accounts').select('*').order('code');
-        setAccounts(updatedAccountsData || []);
-        setTransactions(prev => [...newTransactions, ...prev].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+        const updatedAccounts = updatedAccountsData || [];
+        setAccounts(updatedAccounts);
+        saveToCache(accountsKey, updatedAccounts);
         
-        return newTransactions;
+        const updatedTransactions = [...newTransactionsResult, ...transactions].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        setTransactions(updatedTransactions);
+        saveToCache(transactionsKey, updatedTransactions);
+        
+        return newTransactionsResult;
     };
 
     const updateTransaction = async (id: string, updates: Partial<Omit<Transaction, 'id' | 'entries'>>) => {
+        const key = getCacheKey(CACHE_KEYS.TRANSACTIONS);
+        if (!key) throw new Error("Pengguna tidak login");
+
         const { data, error } = await supabase.from('transactions').update(updates).eq('id', id).select().single();
         if (error) throw error;
-        setTransactions(prev => prev.map(tx => (tx.id === id ? { ...tx, ...data } : tx)));
+        const updatedTransactions = transactions.map(tx => (tx.id === id ? { ...tx, ...data } : tx));
+        setTransactions(updatedTransactions);
+        saveToCache(key, updatedTransactions);
     };
 
     const deleteTransaction = async (id: string) => {
+        const accountsKey = getCacheKey(CACHE_KEYS.ACCOUNTS);
+        const transactionsKey = getCacheKey(CACHE_KEYS.TRANSACTIONS);
+        if (!accountsKey || !transactionsKey) throw new Error("Pengguna tidak login");
+        
         const transactionToDelete = transactions.find(t => t.id === id);
         if (!transactionToDelete) throw new Error("Transaksi tidak ditemukan");
 
@@ -249,40 +309,68 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const { error: txError } = await supabase.from('transactions').delete().eq('id', id);
         if(txError) throw txError;
 
-        setTransactions(prev => prev.filter(tx => tx.id !== id));
+        const updatedTransactions = transactions.filter(tx => tx.id !== id);
+        setTransactions(updatedTransactions);
+        saveToCache(transactionsKey, updatedTransactions);
+        
         const { data: updatedAccountsData } = await supabase.from('accounts').select('*').order('code');
-        setAccounts(updatedAccountsData || []);
+        const updatedAccounts = updatedAccountsData || [];
+        setAccounts(updatedAccounts);
+        saveToCache(accountsKey, updatedAccounts);
     };
 
     const addAsset = async (asset: Omit<Asset, 'id'>): Promise<Asset> => {
+        const key = getCacheKey(CACHE_KEYS.ASSETS);
+        if (!key) throw new Error("Pengguna tidak login");
+        
         const { data, error } = await supabase.from('assets').insert(asset).select().single();
         if (error) throw error;
-        setAssets(prev => [data, ...prev].sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+        const updatedAssets = [data, ...assets].sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        setAssets(updatedAssets);
+        saveToCache(key, updatedAssets);
         return data;
     };
     
     const updateAsset = async (id: string, updates: Partial<Asset>) => {
+        const key = getCacheKey(CACHE_KEYS.ASSETS);
+        if (!key) throw new Error("Pengguna tidak login");
+        
         const { data, error } = await supabase.from('assets').update(updates).eq('id', id).select().single();
         if (error) throw error;
-        setAssets(prev => prev.map(a => (a.id === id ? data : a)));
+        const updatedAssets = assets.map(a => (a.id === id ? data : a));
+        setAssets(updatedAssets);
+        saveToCache(key, updatedAssets);
     };
     
     const deleteAsset = async (id: string) => {
+        const key = getCacheKey(CACHE_KEYS.ASSETS);
+        if (!key) throw new Error("Pengguna tidak login");
+
         const { error } = await supabase.from('assets').delete().eq('id', id);
         if (error) throw error;
-        setAssets(prev => prev.filter(a => a.id !== id));
+        const updatedAssets = assets.filter(a => a.id !== id);
+        setAssets(updatedAssets);
+        saveToCache(key, updatedAssets);
     };
 
     const saveCompanySettings = async (settings: CompanySettings) => {
+        const key = getCacheKey(CACHE_KEYS.COMPANY_SETTINGS);
+        if (!key) throw new Error("Pengguna tidak login");
+
         const { data, error } = await supabase.from('company_settings').upsert({ ...settings, id: 1 }).select().single();
         if (error) throw error;
         setCompanySettings(data);
+        saveToCache(key, data);
     };
 
     const saveTaxSettings = async (settings: TaxSettings) => {
+        const key = getCacheKey(CACHE_KEYS.TAX_SETTINGS);
+        if (!key) throw new Error("Pengguna tidak login");
+        
         const { data, error } = await supabase.from('tax_settings').upsert({ ...settings, id: 1 }).select().single();
         if (error) throw error;
         setTaxSettings(data);
+        saveToCache(key, data);
     };
 
     const value: DataContextType = {

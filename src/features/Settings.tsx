@@ -1,446 +1,254 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Card from '../components/Card';
-import Modal from '../components/Modal';
-import Pagination from '../components/Pagination';
 import { useData } from '../contexts/DataContext';
 import { useAuth } from '../contexts/AuthContext';
-import { formatCurrency, getTodayDateString } from '../utils/helpers';
-import type { Account, AccountType, JournalEntry } from '../types';
-import * as XLSX from 'xlsx';
+import { CACHE_KEYS } from '../utils/helpers';
+import type { CompanySettings } from '../types';
 
+const StatItem: React.FC<{ label: string; value: number | string, icon: string }> = ({ label, value, icon }) => (
+    <div className="flex items-center justify-between p-3 bg-slate-700/50 rounded-lg">
+        <div className="flex items-center">
+            <span className="mr-3 text-lg">{icon}</span>
+            <span className="text-gray-300">{label}</span>
+        </div>
+        <span className="font-bold text-lg">{value}</span>
+    </div>
+);
 
-const AccountForm: React.FC<{
-    isOpen: boolean;
-    onClose: () => void;
-    accountToEdit?: Account | null;
-}> = ({ isOpen, onClose, accountToEdit }) => {
-    const { addAccount, updateAccount, accounts } = useData();
+const DataStatistics: React.FC = () => {
+    const { transactionCount, accountCount, assetCount, loading } = useData();
+
+    if (loading && transactionCount === 0) {
+        return (
+             <div className="text-center text-gray-400 py-8">
+                <p>Memuat statistik...</p>
+            </div>
+        )
+    }
+
+    return (
+        <div className="space-y-3">
+            <StatItem label="Total Transaksi" value={transactionCount} icon="🔄" />
+            <StatItem label="Total Akun" value={accountCount} icon="📚" />
+            <StatItem label="Total Aset" value={assetCount} icon="🏠" />
+        </div>
+    );
+};
+
+const DataManagement: React.FC = () => {
     const { profile } = useAuth();
-    const [formData, setFormData] = useState<Omit<Account, 'id'>>({
-        code: '',
-        name: '',
-        type: 'Aset',
-        balance: 0,
-        description: '',
-    });
-    const [isSubmitting, setIsSubmitting] = useState(false);
-    const [formError, setFormError] = useState<string | null>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const [isRestoring, setIsRestoring] = useState(false);
+
+    const handleBackup = () => {
+        try {
+            const backupData: { [key: string]: string | null } = {};
+            for (const key of Object.values(CACHE_KEYS)) {
+                backupData[key] = localStorage.getItem(key);
+            }
+            
+            const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            const date = new Date().toISOString().split('T')[0];
+            a.download = `financeflow_backup_${date}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        } catch (error) {
+            console.error("Backup failed:", error);
+            alert("Gagal membuat backup data.");
+        }
+    };
+
+    const handleRestoreClick = () => {
+        fileInputRef.current?.click();
+    };
+
+    const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        setIsRestoring(true);
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const text = e.target?.result as string;
+                const data = JSON.parse(text) as Record<string, string | null>;
+
+                const requiredKeys = Object.values(CACHE_KEYS);
+                const dataKeys = Object.keys(data);
+                const isValid = requiredKeys.every(k => dataKeys.includes(k) && (typeof data[k] === 'string' || data[k] === null));
+
+                if (!isValid) {
+                    alert('File backup tidak valid atau formatnya rusak.');
+                    return;
+                }
+
+                if (window.confirm('PERINGATAN: Tindakan ini akan menimpa SEMUA data cache lokal yang ada saat ini. Data akan disinkronkan ulang dari server saat aplikasi dimuat ulang. Apakah Anda yakin ingin melanjutkan?')) {
+                    Object.keys(data).forEach(key => {
+                        if (data[key] !== null) {
+                            localStorage.setItem(key, data[key] as string);
+                        } else {
+                            localStorage.removeItem(key);
+                        }
+                    });
+                    alert('Cache berhasil dipulihkan. Aplikasi akan dimuat ulang sekarang untuk sinkronisasi.');
+                    window.location.reload();
+                }
+            } catch (error) {
+                console.error("Restore failed:", error);
+                alert('Gagal memproses file backup. Pastikan file tersebut adalah file JSON yang valid.');
+            } finally {
+                setIsRestoring(false);
+                if (fileInputRef.current) fileInputRef.current.value = ""; // Reset file input
+            }
+        };
+        reader.readAsText(file);
+    };
+
+    return (
+         <div className="space-y-4">
+            <p className="text-sm text-gray-400">
+                Simpan semua data cache lokal Anda ke dalam satu file, atau pulihkan dari file backup sebelumnya. Berguna untuk memindahkan data antar perangkat atau sebagai cadangan.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-4">
+                <button
+                    onClick={handleBackup}
+                    className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded-lg transition-colors"
+                >
+                    Backup Cache Lokal
+                </button>
+                {profile?.role === 'admin' && (
+                    <>
+                        <input type="file" accept=".json" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
+                        <button
+                            onClick={handleRestoreClick}
+                            disabled={isRestoring}
+                            className="flex-1 bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded-lg transition-colors disabled:bg-gray-500"
+                        >
+                            {isRestoring ? 'Memproses...' : 'Restore Cache dari File'}
+                        </button>
+                    </>
+                )}
+            </div>
+        </div>
+    );
+};
+
+
+const CompanySettingsManager: React.FC = () => {
+    const { companySettings, saveCompanySettings } = useData();
+    const { profile } = useAuth();
+    const [formData, setFormData] = useState<CompanySettings>(companySettings);
+    const [isSaving, setIsSaving] = useState(false);
+    const [isSaved, setIsSaved] = useState(false);
     
     const canEdit = profile?.role === 'admin';
 
     useEffect(() => {
-        if (accountToEdit) {
-            setFormData({
-                code: accountToEdit.code,
-                name: accountToEdit.name,
-                type: accountToEdit.type,
-                balance: accountToEdit.balance,
-                description: accountToEdit.description,
-            });
-        } else {
-            setFormData({
-                code: '',
-                name: '',
-                type: 'Aset',
-                balance: 0,
-                description: '',
-            });
-        }
-        setFormError(null);
-    }, [accountToEdit, isOpen]);
+        setFormData(companySettings);
+    }, [companySettings]);
 
-    const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
         const { name, value } = e.target;
-        if (name === 'balance') {
-            setFormData(prev => ({ ...prev, balance: Number(value) || 0 }));
-        } else {
-            setFormData(prev => ({ ...prev, [name]: value }));
-        }
+        setFormData(prev => ({ ...prev, [name]: value }));
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        setFormError(null);
-        
-        if (!accountToEdit && accounts.some(acc => acc.code === formData.code)) {
-            setFormError(`Kode akun '${formData.code}' sudah digunakan.`);
-            return;
-        }
-
-        setIsSubmitting(true);
+        setIsSaving(true);
+        setIsSaved(false);
         try {
-            if (accountToEdit) {
-                 if (!canEdit) throw new Error("Anda tidak memiliki izin untuk mengedit akun.");
-                const { code, ...updates } = formData;
-                await updateAccount(code, updates);
-            } else {
-                await addAccount(formData);
-            }
-            onClose();
+            await saveCompanySettings(formData);
+            setIsSaved(true);
+            setTimeout(() => setIsSaved(false), 3000);
         } catch (error: any) {
-            console.error('Failed to save account:', error);
-            setFormError(error.message);
+            console.error("Failed to save company settings:", error);
+            alert(`Error: ${error.message}`);
         } finally {
-            setIsSubmitting(false);
+            setIsSaving(false);
         }
     };
-
-    const accountTypes: AccountType[] = ['Aset', 'Liabilitas', 'Modal', 'Pendapatan', 'Beban'];
-    const formInputClasses = "w-full bg-slate-900 border border-slate-700 rounded-md p-2 focus:ring-1 focus:ring-primary focus:border-primary transition-colors";
+    
+    const InputField: React.FC<{ name: keyof CompanySettings, label: string, type?: string, placeholder?: string, required?: boolean }> = ({ name, label, type = 'text', placeholder, required = false }) => (
+        <div>
+            <label htmlFor={name} className="block text-sm font-medium text-gray-300 mb-1">{label}</label>
+            <input
+                type={type}
+                name={name}
+                id={name}
+                value={formData[name] || ''}
+                onChange={handleChange}
+                placeholder={placeholder}
+                required={required}
+                className="w-full bg-slate-700 border border-slate-600 rounded-md p-2"
+                disabled={!canEdit}
+            />
+        </div>
+    );
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title={accountToEdit ? 'Edit Akun' : 'Buat Akun Baru'} size="lg">
-            <form onSubmit={handleSubmit} className="space-y-4">
-                <div>
-                    <label htmlFor="code" className="block text-sm font-medium text-gray-300 mb-1">Kode Akun</label>
-                    <input type="text" name="code" id="code" value={formData.code} onChange={handleInputChange} className={formInputClasses} required disabled={!!accountToEdit} />
+        <div>
+            <form onSubmit={handleSubmit}>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="md:col-span-2">
+                        <InputField name="name" label="Nama Perusahaan" required />
+                    </div>
+                    <div className="md:col-span-2">
+                        <label htmlFor="address" className="block text-sm font-medium text-gray-300 mb-1">Alamat</label>
+                        <textarea name="address" id="address" value={formData.address} onChange={handleChange} rows={3} className="w-full bg-slate-700 border border-slate-600 rounded-md p-2" disabled={!canEdit}></textarea>
+                    </div>
+                    <InputField name="phone" label="Telepon" />
+                    <InputField name="email" label="Email" type="email" />
+                    <InputField name="website" label="Website" type="url" />
+                    <InputField name="owner" label="Pemilik" />
+                    <InputField name="npwp" label="NPWP" />
+                    <InputField name="businessType" label="Jenis Usaha" />
+                    <InputField name="currency" label="Mata Uang" />
+                    <InputField name="taxYear" label="Tahun Pajak" />
+                    <div className="md:col-span-2">
+                        <label htmlFor="description" className="block text-sm font-medium text-gray-300 mb-1">Deskripsi Singkat</label>
+                        <textarea name="description" id="description" value={formData.description} onChange={handleChange} rows={2} className="w-full bg-slate-700 border border-slate-600 rounded-md p-2" disabled={!canEdit}></textarea>
+                    </div>
                 </div>
-                <div>
-                    <label htmlFor="name" className="block text-sm font-medium text-gray-300 mb-1">Nama Akun</label>
-                    <input type="text" name="name" id="name" value={formData.name} onChange={handleInputChange} className={formInputClasses} required disabled={!canEdit && !!accountToEdit} />
-                </div>
-                <div>
-                    <label htmlFor="type" className="block text-sm font-medium text-gray-300 mb-1">Tipe Akun</label>
-                    <select name="type" id="type" value={formData.type} onChange={handleInputChange} className={formInputClasses} disabled={!canEdit && !!accountToEdit}>
-                        {accountTypes.map(type => <option key={type} value={type}>{type}</option>)}
-                    </select>
-                </div>
-                <div>
-                    <label htmlFor="description" className="block text-sm font-medium text-gray-300 mb-1">Deskripsi</label>
-                    <textarea name="description" id="description" value={formData.description} onChange={handleInputChange} rows={3} className={formInputClasses} disabled={!canEdit && !!accountToEdit}></textarea>
-                </div>
-                <div>
-                    <label htmlFor="balance" className="block text-sm font-medium text-gray-300 mb-1">Saldo Awal</label>
-                    <input type="number" name="balance" id="balance" value={formData.balance} onChange={handleInputChange} className={formInputClasses} disabled={!!accountToEdit} />
-                     <p className="text-xs text-gray-400 mt-1">Saldo awal hanya bisa diatur saat membuat akun baru.</p>
-                </div>
-
-                {formError && <p className="text-red-400 text-sm">{formError}</p>}
-                
-                {(canEdit || !accountToEdit) && (
-                    <div className="mt-6 flex justify-end gap-3">
-                        <button type="button" onClick={onClose} className="py-2 px-4 rounded-md bg-slate-600 hover:bg-slate-500 transition-colors">Batal</button>
-                        <button type="submit" disabled={isSubmitting} className="py-2 px-4 rounded-md bg-secondary hover:bg-secondary/80 disabled:bg-gray-500 transition-colors">
-                            {isSubmitting ? 'Menyimpan...' : (accountToEdit ? 'Simpan Perubahan' : 'Buat Akun')}
+                {canEdit && (
+                    <div className="mt-6 flex justify-end items-center gap-4">
+                        {isSaved && <p className="text-green-400 text-sm">Pengaturan disimpan.</p>}
+                        <button type="submit" disabled={isSaving} className="bg-primary hover:bg-primary/80 text-white font-bold py-2 px-6 rounded-lg disabled:bg-gray-500">
+                            {isSaving ? 'Menyimpan...' : 'Simpan Perubahan'}
                         </button>
                     </div>
                 )}
             </form>
-        </Modal>
+        </div>
     );
 };
 
-const ImportAccountsModal: React.FC<{ isOpen: boolean; onClose: () => void; }> = ({ isOpen, onClose }) => {
-    const { addAccountsBatch, addTransaction, accounts } = useData();
-    const [file, setFile] = useState<File | null>(null);
-    const [parsedData, setParsedData] = useState<any[]>([]);
-    const [openingBalanceDate, setOpeningBalanceDate] = useState(getTodayDateString());
-    const [error, setError] = useState<string | null>(null);
-    const [isProcessing, setIsProcessing] = useState(false);
 
-    const accountTypes: AccountType[] = ['Aset', 'Liabilitas', 'Modal', 'Pendapatan', 'Beban'];
-
-    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const selectedFile = e.target.files?.[0];
-        if (selectedFile) {
-            setFile(selectedFile);
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                try {
-                    const data = new Uint8Array(event.target?.result as ArrayBuffer);
-                    const workbook = XLSX.read(data, { type: 'array' });
-                    const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-                    const json = XLSX.utils.sheet_to_json(worksheet);
-                    setParsedData(json);
-                    setError(null);
-                } catch (err) {
-                    setError("Gagal mem-parsing file. Pastikan formatnya benar.");
-                }
-            };
-            reader.readAsArrayBuffer(selectedFile);
-        }
-    };
-
-    const { accountsToImport, openingBalanceTransaction, validationError } = useMemo(() => {
-        if (parsedData.length === 0) return { accountsToImport: [], openingBalanceTransaction: null, validationError: null };
-        try {
-            const newAccounts: Omit<Account, 'id'>[] = [];
-            const entries: Omit<JournalEntry, 'id' | 'transaction_id'>[] = [];
-            let totalDebit = 0;
-            let totalCredit = 0;
-
-            for (const row of parsedData) {
-                const code = row['Kode']?.toString();
-                const name = row['Nama']?.toString();
-                const type = row['Tipe']?.toString() as AccountType;
-                const balance = Number(row['Saldo Awal']) || 0;
-                const description = row['Deskripsi']?.toString() || '';
-
-                if (!code || !name || !type) throw new Error(`Baris tidak lengkap: ${JSON.stringify(row)}. Pastikan ada kolom 'Kode', 'Nama', dan 'Tipe'.`);
-                if (accounts.some(a => a.code === code)) throw new Error(`Kode akun '${code}' sudah ada.`);
-                if (newAccounts.some(a => a.code === code)) throw new Error(`Kode akun '${code}' duplikat di dalam file.`);
-                if (!accountTypes.includes(type)) throw new Error(`Tipe akun tidak valid '${type}' untuk akun ${code}.`);
-
-                newAccounts.push({ code, name, type, balance: 0, description });
-
-                if (balance !== 0) {
-                    if (type === 'Aset' || type === 'Beban') {
-                        entries.push({ account_code: code, debit: balance, credit: 0 });
-                        totalDebit += balance;
-                    } else {
-                        entries.push({ account_code: code, debit: 0, credit: balance });
-                        totalCredit += balance;
-                    }
-                }
-            }
-
-            if (Math.abs(totalDebit - totalCredit) > 0.01) {
-                const difference = totalDebit - totalCredit;
-                if (difference > 0) { // debit > credit, need more credit
-                    entries.push({ account_code: '3999', debit: 0, credit: difference });
-                } else { // credit > debit, need more debit
-                    entries.push({ account_code: '3999', debit: -difference, credit: 0 });
-                }
-            }
-            
-            const transaction = {
-                date: openingBalanceDate,
-                description: 'Saldo Awal dari Impor Akun',
-                ref: 'IMPORT-SALDO-AWAL',
-            };
-            
-            return { accountsToImport: newAccounts, openingBalanceTransaction: { transaction, entries }, validationError: null };
-        } catch (err: any) {
-            return { accountsToImport: [], openingBalanceTransaction: null, validationError: err.message };
-        }
-    }, [parsedData, accounts, openingBalanceDate]);
-    
-    const handleImport = async () => {
-        if (validationError || accountsToImport.length === 0) return;
-        setIsProcessing(true);
-        try {
-            await addAccountsBatch(accountsToImport);
-            if (openingBalanceTransaction && openingBalanceTransaction.entries.length > 0) {
-                await addTransaction(openingBalanceTransaction.transaction, openingBalanceTransaction.entries);
-            }
-            alert(`${accountsToImport.length} akun berhasil diimpor!`);
-            handleClose();
-        } catch (err: any) {
-            setError(`Gagal mengimpor: ${err.message}`);
-        } finally {
-            setIsProcessing(false);
-        }
-    };
-    
-    const handleDownloadTemplate = () => {
-        const exampleData = [
-            { 'Kode': '1110', 'Nama': 'Kas Kecil', 'Tipe': 'Aset', 'Saldo Awal': 1000000, 'Deskripsi': 'Kas kecil untuk operasional harian' },
-            { 'Kode': '2110', 'Nama': 'Utang Kartu Kredit', 'Tipe': 'Liabilitas', 'Saldo Awal': 500000, 'Deskripsi': 'Tagihan kartu kredit bisnis' },
-        ];
-        const ws = XLSX.utils.json_to_sheet(exampleData);
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "Akun");
-        XLSX.writeFile(wb, "Template_Impor_Akun.xlsx");
-    };
-
-    const handleClose = () => {
-        setFile(null);
-        setParsedData([]);
-        setError(null);
-        onClose();
-    };
-
+const Settings: React.FC = () => {
     return (
-        <Modal isOpen={isOpen} onClose={handleClose} title="Impor Akun Massal" size="xl">
-            <div className="space-y-4">
-                <p className="text-sm text-gray-400">Unggah file Excel (.xlsx) untuk mengimpor akun baru. Saldo awal yang diisi akan dicatat sebagai transaksi jurnal pada tanggal yang ditentukan.</p>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <button onClick={handleDownloadTemplate} className="w-full text-center py-2 px-4 rounded-md bg-slate-600 hover:bg-slate-500">Unduh Template</button>
-                    <input type="file" accept=".xlsx" onChange={handleFileChange} className="w-full p-2 bg-slate-700 rounded-md file:mr-4 file:py-1 file:px-2 file:rounded-md file:border-0 file:bg-primary file:text-white" />
-                </div>
-                 <div>
-                    <label htmlFor="openingBalanceDate" className="block text-sm font-medium text-gray-300 mb-1">Tanggal Saldo Awal</label>
-                    <input type="date" id="openingBalanceDate" value={openingBalanceDate} onChange={e => setOpeningBalanceDate(e.target.value)} className="w-full bg-slate-700 border border-slate-600 rounded-md p-2" />
-                </div>
-                
-                {isProcessing && <p>Memproses file...</p>}
-                {error && <p className="text-red-400">{error}</p>}
-                {validationError && <p className="text-red-400">{validationError}</p>}
-
-                {accountsToImport.length > 0 && !validationError && (
-                    <div>
-                        <h4 className="font-semibold mb-2">Pratinjau Impor: {accountsToImport.length} akun baru akan dibuat.</h4>
-                        <div className="max-h-40 overflow-auto p-2 bg-slate-900 rounded-md text-xs mb-2">
-                            <pre>{JSON.stringify(accountsToImport, null, 2)}</pre>
-                        </div>
-                        {openingBalanceTransaction && openingBalanceTransaction.entries.length > 0 && (
-                             <h4 className="font-semibold mb-2">Transaksi saldo awal akan dibuat dengan entri berikut:</h4>
-                        )}
-                        <div className="max-h-40 overflow-auto p-2 bg-slate-900 rounded-md text-xs">
-                             <pre>{JSON.stringify(openingBalanceTransaction, null, 2)}</pre>
-                        </div>
-                    </div>
-                )}
-                <div className="flex justify-end gap-3 pt-4 border-t border-slate-700">
-                    <button onClick={handleClose} className="py-2 px-4 rounded-md bg-slate-600 hover:bg-slate-500">Batal</button>
-                    <button onClick={handleImport} disabled={isProcessing || !!validationError || accountsToImport.length === 0} className="py-2 px-4 rounded-md bg-primary hover:bg-primary/80 disabled:bg-gray-500">Impor Sekarang</button>
-                </div>
+        <div>
+            <h2 className="text-2xl md:text-3xl font-bold mb-6">Pengaturan Sistem</h2>
+            <div className="grid grid-cols-1 lg:grid-cols-1 gap-6 md:gap-8">
+                <Card>
+                    <h3 className="text-xl font-semibold mb-4">Informasi Perusahaan</h3>
+                    <CompanySettingsManager />
+                </Card>
+                 <Card>
+                    <h3 className="text-xl font-semibold mb-4">Manajemen Cache Lokal</h3>
+                    <DataManagement />
+                </Card>
+                 <Card>
+                    <h3 className="text-xl font-semibold mb-4">Statistik Data</h3>
+                    <p className="text-sm text-gray-400 mb-4">Jumlah catatan yang saat ini tersimpan di database.</p>
+                    <DataStatistics />
+                </Card>
             </div>
-        </Modal>
-    );
-}
-
-const Accounts: React.FC = () => {
-    const { accounts, loading, error, deleteAccount } = useData();
-    const { profile } = useAuth();
-    const [isModalOpen, setIsModalOpen] = useState(false);
-    const [isImportModalOpen, setIsImportModalOpen] = useState(false);
-    const [editingAccount, setEditingAccount] = useState<Account | null>(null);
-    const [searchTerm, setSearchTerm] = useState('');
-    const [filterType, setFilterType] = useState<AccountType | 'All'>('All');
-    const [currentPage, setCurrentPage] = useState(1);
-    const ITEMS_PER_PAGE = 10;
-    
-    const canCreate = profile?.role === 'admin' || profile?.role === 'staff';
-    const canDelete = profile?.role === 'admin';
-    const canEdit = profile?.role === 'admin';
-
-    const handleOpenModal = (account?: Account) => {
-        setEditingAccount(account || null);
-        setIsModalOpen(true);
-    };
-
-    const handleCloseModal = () => {
-        setIsModalOpen(false);
-        setEditingAccount(null);
-    };
-
-    const handleDelete = async (account: Account) => {
-        if (account.balance !== 0) {
-            alert("Tidak dapat menghapus akun dengan saldo yang tidak nol. Harap transfer saldo ke akun lain terlebih dahulu.");
-            return;
-        }
-
-        if (window.confirm(`Apakah Anda yakin ingin menghapus akun '${account.code} - ${account.name}'?`)) {
-            try {
-                await deleteAccount(account.code);
-            } catch (err: any) {
-                alert(`Gagal menghapus akun: ${err.message}`);
-            }
-        }
-    };
-    
-    const filteredAccounts = useMemo(() => {
-        return accounts
-            .filter(acc => {
-                const searchLower = searchTerm.toLowerCase();
-                const matchesSearch = acc.name.toLowerCase().includes(searchLower) || acc.code.toLowerCase().includes(searchLower);
-                const matchesType = filterType === 'All' ? true : acc.type === filterType;
-                return matchesSearch && matchesType;
-            })
-            .sort((a, b) => a.code.localeCompare(b.code));
-    }, [accounts, searchTerm, filterType]);
-
-    const paginatedAccounts = useMemo(() => {
-        const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-        return filteredAccounts.slice(startIndex, startIndex + ITEMS_PER_PAGE);
-    }, [filteredAccounts, currentPage]);
-
-    useEffect(() => {
-        setCurrentPage(1);
-    }, [searchTerm, filterType]);
-
-    const accountTypes: AccountType[] = ['Aset', 'Liabilitas', 'Modal', 'Pendapatan', 'Beban'];
-
-    return (
-        <Card>
-            <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-3">
-                <h2 className="text-2xl md:text-3xl font-bold">Bagan Akun (Chart of Accounts)</h2>
-                <div className="flex gap-2 flex-wrap justify-center">
-                    {canCreate && <button onClick={() => setIsImportModalOpen(true)} className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-4 rounded-lg text-sm">Impor Akun</button>}
-                    {canCreate && <button onClick={() => handleOpenModal()} className="bg-primary hover:bg-primary/80 text-white font-bold py-2 px-4 rounded-lg text-sm">
-                        + Akun Baru
-                    </button>}
-                </div>
-            </div>
-            
-            <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-                <input
-                    type="text"
-                    placeholder="Cari nama atau kode akun..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full bg-slate-700 border border-slate-600 rounded-md p-2"
-                />
-                <select
-                    value={filterType}
-                    onChange={(e) => setFilterType(e.target.value as AccountType | 'All')}
-                    className="w-full bg-slate-700 border border-slate-600 rounded-md p-2"
-                >
-                    <option value="All">Semua Tipe Akun</option>
-                    {accountTypes.map(type => <option key={type} value={type}>{type}</option>)}
-                </select>
-            </div>
-
-            {loading && <div className="text-center py-8">Memuat daftar akun...</div>}
-            {error && <div className="text-center py-8 text-red-400">Error: {error}</div>}
-
-            {!loading && !error && (
-                <>
-                <div className="overflow-x-auto">
-                    <table className="w-full min-w-[800px]">
-                        <thead>
-                            <tr className="border-b border-gray-600">
-                                <th className="text-left py-3 px-4">Kode</th>
-                                <th className="text-left py-3 px-4">Nama Akun</th>
-                                <th className="text-left py-3 px-4">Tipe</th>
-                                <th className="text-right py-3 px-4">Saldo</th>
-                                <th className="text-center py-3 px-4">Aksi</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {paginatedAccounts.length > 0 ? (
-                                paginatedAccounts.map(acc => (
-                                    <tr key={acc.code} className="border-b border-gray-700 hover:bg-slate-800/50">
-                                        <td className="py-3 px-4 font-mono">{acc.code}</td>
-                                        <td className="py-3 px-4">{acc.name}</td>
-                                        <td className="py-3 px-4 text-gray-300">{acc.type}</td>
-                                        <td className="py-3 px-4 text-right font-mono">{formatCurrency(acc.balance)}</td>
-                                        <td className="py-3 px-4 text-center">
-                                            <button onClick={() => handleOpenModal(acc)} className="text-blue-400 hover:underline text-sm mr-3">{canEdit ? 'Edit' : 'Lihat'}</button>
-                                            {canDelete && <button
-                                                onClick={() => handleDelete(acc)}
-                                                className={`text-sm ${acc.balance !== 0 ? 'text-gray-500 cursor-not-allowed' : 'text-red-400 hover:underline'}`}
-                                                title={acc.balance !== 0 ? "Tidak bisa dihapus karena saldo tidak nol" : "Hapus akun"}
-                                                disabled={acc.balance !== 0}
-                                            >
-                                                Hapus
-                                            </button>}
-                                        </td>
-                                    </tr>
-                                ))
-                            ) : (
-                                <tr>
-                                    <td colSpan={5} className="text-center text-gray-400 py-8">
-                                        {accounts.length > 0 ? 'Tidak ada akun yang cocok dengan kriteria.' : "Belum ada akun. Klik 'Akun Baru' untuk memulai."}
-                                    </td>
-                                </tr>
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-                <Pagination 
-                    currentPage={currentPage}
-                    totalItems={filteredAccounts.length}
-                    itemsPerPage={ITEMS_PER_PAGE}
-                    onPageChange={setCurrentPage}
-                />
-            </>
-            )}
-            <AccountForm isOpen={isModalOpen} onClose={handleCloseModal} accountToEdit={editingAccount} />
-            {canCreate && <ImportAccountsModal isOpen={isImportModalOpen} onClose={() => setIsImportModalOpen(false)} />}
-        </Card>
+        </div>
     );
 };
 
-export default Accounts;
+export default Settings;

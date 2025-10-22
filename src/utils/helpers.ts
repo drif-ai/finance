@@ -33,6 +33,34 @@ export const subtractYears = (dateStr: string, years: number): string => {
     return date.toISOString().split('T')[0];
 };
 
+// Kunci untuk caching di localStorage
+export const CACHE_KEYS = {
+    ACCOUNTS: 'financeflow_supabase_accounts',
+    TRANSACTIONS: 'financeflow_supabase_transactions',
+    ASSETS: 'financeflow_supabase_assets',
+    COMPANY_SETTINGS: 'financeflow_supabase_company_settings',
+    TAX_SETTINGS: 'financeflow_supabase_tax_settings',
+};
+
+export const loadFromCache = <T,>(key: string, defaultValue: T): T => {
+    try {
+        const item = localStorage.getItem(key);
+        return item ? JSON.parse(item) : defaultValue;
+    } catch (error) {
+        console.warn(`Error reading from localStorage key "${key}":`, error);
+        return defaultValue;
+    }
+};
+
+export const saveToCache = (key: string, data: any) => {
+    try {
+        localStorage.setItem(key, JSON.stringify(data));
+    } catch (error) {
+        console.error(`Error writing to localStorage key "${key}":`, error);
+    }
+};
+
+
 export const defaultCompanySettings: CompanySettings = {
     name: 'An Nahl Islamic School',
     address: 'Jl. Raya Ciangsana KM.07 Gunung Putri Bogor',
@@ -91,18 +119,6 @@ export const defaultAccounts: Omit<Account, 'id'>[] = [
 
 export const calculatePeriodFinancials = (accounts: Account[], transactions: Transaction[], period: { start: string, end: string }) => {
     
-    // 1. Calculate balance changes within the period
-    const periodChanges = new Map<string, number>(accounts.map(a => [a.code, 0]));
-    transactions
-        .filter(tx => tx.date >= period.start && tx.date <= period.end)
-        .forEach(tx => {
-            tx.entries.forEach(e => {
-                const change = e.debit - e.credit;
-                periodChanges.set(e.account_code, (periodChanges.get(e.account_code) || 0) + change);
-            });
-        });
-
-    // 2. Calculate opening balances (balances right before the period start)
     const openingBalances = new Map<string, number>(accounts.map(a => [a.code, 0]));
      transactions
         .filter(tx => tx.date < period.start)
@@ -113,14 +129,22 @@ export const calculatePeriodFinancials = (accounts: Account[], transactions: Tra
             });
         });
 
-    // 3. Calculate Income Statement figures (from period changes)
+    const periodChanges = new Map<string, number>(accounts.map(a => [a.code, 0]));
+    transactions
+        .filter(tx => tx.date >= period.start && tx.date <= period.end)
+        .forEach(tx => {
+            tx.entries.forEach(e => {
+                const change = e.debit - e.credit;
+                periodChanges.set(e.account_code, (periodChanges.get(e.account_code) || 0) + change);
+            });
+        });
+        
     const revenues = accounts.filter(a => a.type === 'Pendapatan').map(a => ({...a, balance: -(periodChanges.get(a.code) || 0)}));
     const expenses = accounts.filter(a => a.type === 'Beban').map(a => ({...a, balance: periodChanges.get(a.code) || 0}));
     const totalRevenue = revenues.reduce((s, a) => s + a.balance, 0);
     const totalExpense = expenses.reduce((s, a) => s + a.balance, 0);
     const netIncome = totalRevenue - totalExpense;
 
-    // 4. Calculate Balance Sheet figures (opening balance + period change)
     const closingBalances = new Map<string, number>();
     accounts.forEach(a => {
         const opening = openingBalances.get(a.code) || 0;
@@ -132,8 +156,14 @@ export const calculatePeriodFinancials = (accounts: Account[], transactions: Tra
     const liabilities = accounts.filter(a => a.type === 'Liabilitas').map(a => ({...a, balance: -(closingBalances.get(a.code) || 0)}));
     const equity = accounts.filter(a => a.type === 'Modal').map(a => ({...a, balance: -(closingBalances.get(a.code) || 0)}));
     
-    // Add net income to retained earnings for the balance sheet
-    const equityWithPL = equity.map(a => a.code === '3200' ? {...a, balance: a.balance + netIncome} : a);
+    // FIX: Calculate prior period Profit/Loss and add it to the current period's net income
+    // to get the correct Retained Earnings for the balance sheet.
+    const priorPeriodPL = -accounts
+        .filter(a => a.type === 'Pendapatan' || a.type === 'Beban')
+        .reduce((sum, acc) => sum + (openingBalances.get(acc.code) || 0), 0);
+        
+    // Add both prior P/L and current net income to retained earnings
+    const equityWithPL = equity.map(a => a.code === '3200' ? {...a, balance: a.balance + priorPeriodPL + netIncome} : a);
 
     const totalAssets = assets.reduce((s, a) => s + (a.name.toLowerCase().includes('akumulasi') ? -(a.balance) : a.balance), 0);
     const totalLiabilities = liabilities.reduce((s, a) => s + a.balance, 0);
@@ -141,7 +171,6 @@ export const calculatePeriodFinancials = (accounts: Account[], transactions: Tra
     const totalEquityWithPL = equityWithPL.reduce((s, a) => s + a.balance, 0);
     const totalLiabilitiesAndEquity = totalLiabilities + totalEquityWithPL;
     
-    // 5. Calculate Cash Flow (simplified)
     const cashAccountCodes = accounts.filter(a => a.type === 'Aset' && (a.name.toLowerCase().includes('kas') || a.name.toLowerCase().includes('bank'))).map(a => a.code);
     const startCash = cashAccountCodes.reduce((s, code) => s + (openingBalances.get(code) || 0), 0);
     const endCash = cashAccountCodes.reduce((s, code) => s + (closingBalances.get(code) || 0), 0);
