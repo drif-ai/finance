@@ -1,8 +1,8 @@
-const CACHE_NAME = 'financeflow-pro-cache-v3'; // Incremented version
+const CACHE_NAME = 'financeflow-pro-cache-v4'; // Incremented version
 const urlsToCache = [
-  '/',
-  '/index.html',
-  '/manifest.json',
+  './',
+  './index.html',
+  './manifest.json',
   // It's better not to cache the CDN script itself, but let the browser handle it.
   // Caching opaque responses (like from CDNs) can fill up storage quickly.
   // The main benefit is caching the app shell.
@@ -29,7 +29,7 @@ self.addEventListener('fetch', event => {
     // This ensures users get the latest HTML.
     if (event.request.mode === 'navigate') {
         event.respondWith(
-            fetch(event.request).catch(() => caches.match('/index.html'))
+            fetch(event.request).catch(() => caches.match('./index.html'))
         );
         return;
     }

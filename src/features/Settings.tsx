@@ -145,6 +145,7 @@ const CompanySettingsManager: React.FC = () => {
     const [formData, setFormData] = useState<CompanySettings>(companySettings);
     const [isSaving, setIsSaving] = useState(false);
     const [isSaved, setIsSaved] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
     
     const canEdit = profile?.role === 'admin';
 
@@ -172,6 +173,54 @@ const CompanySettingsManager: React.FC = () => {
             setIsSaving(false);
         }
     };
+
+    const handleExport = () => {
+        try {
+            const blob = new Blob([JSON.stringify(formData, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'company-settings.json';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        } catch (error) {
+            console.error("Export failed:", error);
+            alert("Gagal mengekspor data perusahaan.");
+        }
+    };
+
+    const handleImportClick = () => {
+        fileInputRef.current?.click();
+    };
+
+    const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const text = e.target?.result as string;
+                const importedData = JSON.parse(text) as Partial<CompanySettings>;
+
+                if (typeof importedData.name !== 'string') {
+                    throw new Error("Format file tidak valid. Setidaknya harus memiliki kunci 'name'.");
+                }
+                
+                setFormData(prev => ({ ...prev, ...importedData }));
+                alert('Data berhasil diimpor. Tinjau informasi di bawah dan klik "Simpan Perubahan" untuk mengonfirmasi.');
+
+            } catch (error: any) {
+                console.error("Import failed:", error);
+                alert(`Gagal mengimpor file: ${error.message}`);
+            } finally {
+                if (fileInputRef.current) fileInputRef.current.value = "";
+            }
+        };
+        reader.readAsText(file);
+    };
     
     const InputField: React.FC<{ name: keyof CompanySettings, label: string, type?: string, placeholder?: string, required?: boolean }> = ({ name, label, type = 'text', placeholder, required = false }) => (
         <div>
@@ -192,6 +241,19 @@ const CompanySettingsManager: React.FC = () => {
 
     return (
         <div>
+            {canEdit && (
+                 <div className="flex flex-col sm:flex-row gap-4 mb-4">
+                    <input type="file" accept=".json" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
+                    <button type="button" onClick={handleImportClick} className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-4 rounded-lg transition-colors">
+                        Impor Data (.json)
+                    </button>
+                    <button type="button" onClick={handleExport} className="flex-1 bg-slate-600 hover:bg-slate-500 text-white font-bold py-2 px-4 rounded-lg transition-colors">
+                        Ekspor Data (.json)
+                    </button>
+                </div>
+            )}
+            {canEdit && <p className="text-center text-sm text-gray-400 mb-6 py-4 border-t border-b border-slate-700">Anda dapat mengimpor data dari file, atau mengisi formulir di bawah secara manual.</p>}
+
             <form onSubmit={handleSubmit}>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="md:col-span-2">

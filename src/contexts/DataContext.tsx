@@ -40,14 +40,12 @@ const DataContext = createContext<DataContextType | undefined>(undefined);
 export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const { session, loading: authLoading } = useAuth();
     
-    // Initialize state as empty. Data will be loaded from cache inside useEffect.
     const [accounts, setAccounts] = useState<Account[]>([]);
     const [transactions, setTransactions] = useState<Transaction[]>([]);
     const [assets, setAssets] = useState<Asset[]>([]);
     const [companySettings, setCompanySettings] = useState<CompanySettings>(defaultCompanySettings);
     const [taxSettings, setTaxSettings] = useState<TaxSettings>(defaultTaxSettings);
     
-    // 'loading' now represents background syncing activity.
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
@@ -64,7 +62,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         if (!session) {
-            // Clear state when user logs out.
             setAccounts([]);
             setTransactions([]);
             setAssets([]);
@@ -76,33 +73,30 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         const userId = session.user.id;
 
-        // --- STALE ---
-        // Load data from user-specific cache immediately for an instant UI response.
-        setAccounts(loadFromCache(`${CACHE_KEYS.ACCOUNTS}_${userId}`, []));
-        setTransactions(loadFromCache(`${CACHE_KEYS.TRANSACTIONS}_${userId}`, []));
+        const cachedAccounts = loadFromCache(`${CACHE_KEYS.ACCOUNTS}_${userId}`, []);
+        setAccounts(cachedAccounts);
+        const cachedTransactions = loadFromCache(`${CACHE_KEYS.TRANSACTIONS}_${userId}`, []);
+        setTransactions(cachedTransactions);
         setAssets(loadFromCache(`${CACHE_KEYS.ASSETS}_${userId}`, []));
         setCompanySettings(loadFromCache(`${CACHE_KEYS.COMPANY_SETTINGS}_${userId}`, defaultCompanySettings));
         setTaxSettings(loadFromCache(`${CACHE_KEYS.TAX_SETTINGS}_${userId}`, defaultTaxSettings));
-        setLoading(false); // Stop initial loading, UI is now interactive with cached data.
+        setLoading(cachedAccounts.length === 0 && cachedTransactions.length === 0);
 
-        // --- REVALIDATE ---
-        // Fetch fresh data from Supabase in the background.
-        const fetchData = async () => {
-            setLoading(true); // Indicate background sync has started.
+        const revalidate = async () => {
             setError(null);
             try {
                 const accountsPromise = supabase.from('accounts').select('*').order('code');
                 const transactionsPromise = supabase.from('transactions').select('*, journal_entries(*)').order('date', { ascending: false });
                 const assetsPromise = supabase.from('assets').select('*').order('date', { ascending: false });
-                const companySettingsPromise = supabase.from('company_settings').select('*').limit(1);
-                const taxSettingsPromise = supabase.from('tax_settings').select('*').limit(1);
+                const companySettingsPromise = supabase.from('company_settings').select('*').limit(1).maybeSingle();
+                const taxSettingsPromise = supabase.from('tax_settings').select('*').limit(1).maybeSingle();
 
                 const [
                     { data: accountsData, error: accountsError },
                     { data: transactionsData, error: transactionsError },
                     { data: assetsData, error: assetsError },
-                    { data: companySettingsDataArray, error: companySettingsError },
-                    { data: taxSettingsDataArray, error: taxSettingsError },
+                    { data: companySettingsData, error: companySettingsError },
+                    { data: taxSettingsData, error: taxSettingsError },
                 ] = await Promise.all([accountsPromise, transactionsPromise, assetsPromise, companySettingsPromise, taxSettingsPromise]);
 
                 if (accountsError) throw accountsError;
@@ -110,13 +104,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 if (assetsError) throw assetsError;
                 if (companySettingsError) throw companySettingsError;
                 if (taxSettingsError) throw taxSettingsError;
-
+                
                 const formattedTransactions = transactionsData?.map(tx => ({ ...tx, entries: tx.journal_entries || [] })) || [];
                 
-                const companySettingsData = companySettingsDataArray?.[0];
-                const taxSettingsData = taxSettingsDataArray?.[0];
-
-                // Update state and user-specific cache with fresh data.
                 setAccounts(accountsData || []);
                 saveToCache(`${CACHE_KEYS.ACCOUNTS}_${userId}`, accountsData || []);
                 
@@ -136,14 +126,25 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 }
 
             } catch (err: any) {
-                console.error("Gagal mengambil data sinkronisasi:", err);
+                console.error("Gagal sinkronisasi data:", err);
                 setError(`Gagal sinkronisasi data: ${err.message}`);
             } finally {
-                setLoading(false); // Background sync finished.
+                setLoading(false);
             }
         };
 
-        fetchData();
+        revalidate();
+
+        const allChangesChannel = supabase.channel(`public-db-changes-${userId}`)
+            .on('postgres_changes', { event: '*', schema: 'public' }, (payload) => {
+                console.log('Realtime change received!', payload);
+                revalidate();
+            })
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(allChangesChannel);
+        };
     }, [session, authLoading]);
 
     const transactionCount = transactions.length;
@@ -158,10 +159,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const { data, error } = await supabase.from('accounts').insert(accountsToInsert).select();
         if (error) throw error;
         
-        const updatedAccounts = [...accounts, ...data].sort((a, b) => a.code.localeCompare(b.code));
-        setAccounts(updatedAccounts);
-        saveToCache(key, updatedAccounts);
-        
+        // Let the realtime subscription handle state updates
         return data;
     };
 
@@ -189,25 +187,15 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
     
     const updateAccount = async (code: string, updates: Partial<Account>) => {
-        const key = getCacheKey(CACHE_KEYS.ACCOUNTS);
-        if (!key) throw new Error("Pengguna tidak login");
-        
-        const { data, error } = await supabase.from('accounts').update(updates).eq('code', code).select().single();
+        const { error } = await supabase.from('accounts').update(updates).eq('code', code);
         if (error) throw error;
-        const updatedAccounts = accounts.map(acc => acc.code === code ? data : acc);
-        setAccounts(updatedAccounts);
-        saveToCache(key, updatedAccounts);
+        // Let realtime handle state update
     };
     
     const deleteAccount = async (code: string) => {
-        const key = getCacheKey(CACHE_KEYS.ACCOUNTS);
-        if (!key) throw new Error("Pengguna tidak login");
-
         const { error } = await supabase.from('accounts').delete().eq('code', code);
         if (error) throw error;
-        const updatedAccounts = accounts.filter(acc => acc.code !== code);
-        setAccounts(updatedAccounts);
-        saveToCache(key, updatedAccounts);
+        // Let realtime handle state update
     };
 
     const addTransaction = async (transaction: Omit<Transaction, 'id' | 'entries'>, entries: Omit<JournalEntry, 'id'|'transaction_id'>[]): Promise<Transaction> => {
@@ -215,11 +203,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
        return newTx;
     };
     
-    const addTransactionsBatch = async (transactionsData: NewTransactionData[]): Promise<Transaction[]> => {
-        const accountsKey = getCacheKey(CACHE_KEYS.ACCOUNTS);
-        const transactionsKey = getCacheKey(CACHE_KEYS.TRANSACTIONS);
-        if (!accountsKey || !transactionsKey) throw new Error("Pengguna tidak login");
-
+     const addTransactionsBatch = async (transactionsData: NewTransactionData[]): Promise<Transaction[]> => {
         const newTransactionsResult: Transaction[] = [];
 
         for (const { transaction, entries } of transactionsData) {
@@ -257,35 +241,18 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const newFullTransaction = { ...txData, entries: entriesData || [] };
             newTransactionsResult.push(newFullTransaction);
         }
-
-        const { data: updatedAccountsData } = await supabase.from('accounts').select('*').order('code');
-        const updatedAccounts = updatedAccountsData || [];
-        setAccounts(updatedAccounts);
-        saveToCache(accountsKey, updatedAccounts);
         
-        const updatedTransactions = [...newTransactionsResult, ...transactions].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-        setTransactions(updatedTransactions);
-        saveToCache(transactionsKey, updatedTransactions);
-        
+        // Let realtime handle state updates, but return the created transactions
         return newTransactionsResult;
     };
 
     const updateTransaction = async (id: string, updates: Partial<Omit<Transaction, 'id' | 'entries'>>) => {
-        const key = getCacheKey(CACHE_KEYS.TRANSACTIONS);
-        if (!key) throw new Error("Pengguna tidak login");
-
-        const { data, error } = await supabase.from('transactions').update(updates).eq('id', id).select().single();
+        const { error } = await supabase.from('transactions').update(updates).eq('id', id);
         if (error) throw error;
-        const updatedTransactions = transactions.map(tx => (tx.id === id ? { ...tx, ...data } : tx));
-        setTransactions(updatedTransactions);
-        saveToCache(key, updatedTransactions);
+        // Let realtime handle state update
     };
 
     const deleteTransaction = async (id: string) => {
-        const accountsKey = getCacheKey(CACHE_KEYS.ACCOUNTS);
-        const transactionsKey = getCacheKey(CACHE_KEYS.TRANSACTIONS);
-        if (!accountsKey || !transactionsKey) throw new Error("Pengguna tidak login");
-        
         const transactionToDelete = transactions.find(t => t.id === id);
         if (!transactionToDelete) throw new Error("Transaksi tidak ditemukan");
 
@@ -308,49 +275,26 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         
         const { error: txError } = await supabase.from('transactions').delete().eq('id', id);
         if(txError) throw txError;
-
-        const updatedTransactions = transactions.filter(tx => tx.id !== id);
-        setTransactions(updatedTransactions);
-        saveToCache(transactionsKey, updatedTransactions);
-        
-        const { data: updatedAccountsData } = await supabase.from('accounts').select('*').order('code');
-        const updatedAccounts = updatedAccountsData || [];
-        setAccounts(updatedAccounts);
-        saveToCache(accountsKey, updatedAccounts);
+        // Let realtime handle state update
     };
 
     const addAsset = async (asset: Omit<Asset, 'id'>): Promise<Asset> => {
-        const key = getCacheKey(CACHE_KEYS.ASSETS);
-        if (!key) throw new Error("Pengguna tidak login");
-        
         const { data, error } = await supabase.from('assets').insert(asset).select().single();
         if (error) throw error;
-        const updatedAssets = [data, ...assets].sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-        setAssets(updatedAssets);
-        saveToCache(key, updatedAssets);
+        // Let realtime handle state update
         return data;
     };
     
     const updateAsset = async (id: string, updates: Partial<Asset>) => {
-        const key = getCacheKey(CACHE_KEYS.ASSETS);
-        if (!key) throw new Error("Pengguna tidak login");
-        
-        const { data, error } = await supabase.from('assets').update(updates).eq('id', id).select().single();
+        const { error } = await supabase.from('assets').update(updates).eq('id', id);
         if (error) throw error;
-        const updatedAssets = assets.map(a => (a.id === id ? data : a));
-        setAssets(updatedAssets);
-        saveToCache(key, updatedAssets);
+        // Let realtime handle state update
     };
     
     const deleteAsset = async (id: string) => {
-        const key = getCacheKey(CACHE_KEYS.ASSETS);
-        if (!key) throw new Error("Pengguna tidak login");
-
         const { error } = await supabase.from('assets').delete().eq('id', id);
         if (error) throw error;
-        const updatedAssets = assets.filter(a => a.id !== id);
-        setAssets(updatedAssets);
-        saveToCache(key, updatedAssets);
+        // Let realtime handle state update
     };
 
     const saveCompanySettings = async (settings: CompanySettings) => {

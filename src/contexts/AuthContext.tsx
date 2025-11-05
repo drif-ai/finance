@@ -20,40 +20,38 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        const getInitialSession = async () => {
-            const { data: { session } } = await supabase.auth.getSession();
+        // The onAuthStateChange listener fires immediately with the current session state,
+        // which handles both the initial load and subsequent changes.
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
             setSession(session);
             setUser(session?.user ?? null);
-            if (session?.user) {
-                const { data: profileData } = await supabase
-                    .from('profiles')
-                    .select('*')
-                    .eq('id', session.user.id)
-                    .single();
-                setProfile(profileData);
-            }
-            setLoading(false);
-        };
-        
-        getInitialSession();
 
-        const { data: authListener } = supabase.auth.onAuthStateChange(async (_event, session) => {
-            setSession(session);
-            setUser(session?.user ?? null);
             if (session?.user) {
-                 const { data: profileData } = await supabase
-                    .from('profiles')
-                    .select('*')
-                    .eq('id', session.user.id)
-                    .single();
-                setProfile(profileData);
+                try {
+                    const { data: profileData, error } = await supabase
+                        .from('profiles')
+                        .select('*')
+                        .eq('id', session.user.id)
+                        .maybeSingle();
+
+                    if (error) throw error;
+                    setProfile(profileData);
+
+                } catch (e) {
+                    console.error("Error fetching profile on auth change:", e);
+                    setProfile(null);
+                }
             } else {
                 setProfile(null);
             }
+            // The first time this callback runs, the session state is resolved.
+            // We can now safely set loading to false.
+            setLoading(false);
         });
 
+        // Cleanup function to unsubscribe from the listener when the component unmounts.
         return () => {
-            authListener.subscription.unsubscribe();
+            subscription.unsubscribe();
         };
     }, []);
 

@@ -304,6 +304,7 @@ const Accounts: React.FC = () => {
     const canCreate = profile?.role === 'admin' || profile?.role === 'staff';
     const canDelete = profile?.role === 'admin';
     const canEdit = profile?.role === 'admin';
+    const canImport = profile?.role === 'admin';
 
     const handleOpenModal = (account?: Account) => {
         setEditingAccount(account || null);
@@ -357,7 +358,7 @@ const Accounts: React.FC = () => {
             <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-3">
                 <h2 className="text-2xl md:text-3xl font-bold">Bagan Akun (Chart of Accounts)</h2>
                 <div className="flex gap-2 flex-wrap justify-center">
-                    {canCreate && <button onClick={() => setIsImportModalOpen(true)} className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-4 rounded-lg text-sm">Impor Akun</button>}
+                    {canImport && <button onClick={() => setIsImportModalOpen(true)} className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-4 rounded-lg text-sm">Impor Akun</button>}
                     {canCreate && <button onClick={() => handleOpenModal()} className="bg-primary hover:bg-primary/80 text-white font-bold py-2 px-4 rounded-lg text-sm">
                         + Akun Baru
                     </button>}
@@ -438,7 +439,7 @@ const Accounts: React.FC = () => {
             </>
             )}
             <AccountForm isOpen={isModalOpen} onClose={handleCloseModal} accountToEdit={editingAccount} />
-            {canCreate && <ImportAccountsModal isOpen={isImportModalOpen} onClose={() => setIsImportModalOpen(false)} />}
+            {canImport && <ImportAccountsModal isOpen={isImportModalOpen} onClose={() => setIsImportModalOpen(false)} />}
         </Card>
     );
 };

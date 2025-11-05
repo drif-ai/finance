@@ -410,6 +410,7 @@ const Transactions: React.FC = () => {
     const canCreate = profile?.role === 'admin' || profile?.role === 'staff';
     const canDelete = profile?.role === 'admin';
     const canEdit = profile?.role === 'admin';
+    const canImport = profile?.role === 'admin';
 
     const filteredTransactions = useMemo(() => {
         return transactions.filter(tx => {
@@ -474,7 +475,7 @@ const Transactions: React.FC = () => {
             <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-3">
                 <h2 className="text-2xl md:text-3xl font-bold">Pencatatan Transaksi</h2>
                 <div className="flex gap-2 flex-wrap justify-center">
-                    {canCreate && <button onClick={() => setIsImportModalOpen(true)} className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-4 rounded-lg text-sm">Impor</button>}
+                    {canImport && <button onClick={() => setIsImportModalOpen(true)} className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-4 rounded-lg text-sm">Impor</button>}
                     <button onClick={handleExport} className="bg-slate-600 hover:bg-slate-500 text-white font-bold py-2 px-4 rounded-lg text-sm">Ekspor</button>
                     {canCreate && <button onClick={() => handleOpenModal()} className="bg-primary hover:bg-primary/80 text-white font-bold py-2 px-4 rounded-lg text-sm">+ Transaksi Baru</button>}
                 </div>
@@ -568,7 +569,7 @@ const Transactions: React.FC = () => {
             </>
             )}
              <TransactionForm isOpen={isFormModalOpen} onClose={handleCloseModal} transactionToEdit={editingTransaction} />
-             {canCreate && <ImportTransactionsModal isOpen={isImportModalOpen} onClose={() => setIsImportModalOpen(false)} />}
+             {canImport && <ImportTransactionsModal isOpen={isImportModalOpen} onClose={() => setIsImportModalOpen(false)} />}
         </Card>
     );
 };

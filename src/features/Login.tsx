@@ -28,9 +28,9 @@ const Login: React.FC = () => {
     return (
         <div className="flex items-center justify-center min-h-screen px-4">
             <Card className="w-full max-w-sm">
-                <div className="text-center mb-6">
-                    <div className="w-16 h-16 bg-gradient-to-r from-primary to-secondary rounded-lg flex items-center justify-center mx-auto mb-4">
-                        <span className="text-white font-bold text-3xl">FF</span>
+            <div className="text-center mb-6">
+                <div className="w-16 h-16 bg-gradient-to-r from-primary to-secondary rounded-lg flex items-center justify-center mx-auto mb-4">
+                    <span className="text-white font-bold text-3xl">FF</span>
                     </div>
                     <h1 className="text-2xl font-bold">Selamat Datang</h1>
                     <p className="text-gray-400">Masuk untuk mengelola keuangan Anda</p>
@@ -69,8 +69,15 @@ const Login: React.FC = () => {
                     >
                         {loading ? 'Memproses...' : 'Masuk'}
                     </button>
-                </form>
+                </form>               
+                <span className="flex items-center justify-center text-gray-400">
+                © 2025 FinanceFlow Pro
+                </span>
+                <p className="flex items-center justify-center text-gray-400">
+                All rights reserved.
+                </p>
             </Card>
+            
         </div>
     );
 };
