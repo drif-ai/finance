@@ -1,29 +1,33 @@
-name: Deploy to Hostinger via FTP
+name: Deploy to Hostinger
 
 on:
   push:
     branches: ["main"]
 
 jobs:
-  ftp-deploy:
+  deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Build Project
-        run: |
-          npm install
-          npm run build
-
-      - name: Deploy to Hostinger
-        uses: SamKirkland/FTP-Deploy-Action@4.3.3
+      - name: Install Node
+        uses: actions/setup-node@v3
         with:
-          server: ${{ secrets.FTP_SERVER }}
-          username: ${{ secrets.FTP_USERNAME }}
-          password: ${{ secrets.FTP_PASSWORD }}
-          protocol: ftp
-          port: 21
-          local-dir: dist/
-          server-dir: /public_html/finance/
+          node-version: 18
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build
+        run: npm run build
+
+      - name: FTP Deploy
+        uses: SamKirkland/FTP-Deploy-Action@v3.1.1
+        with:
+          ftp-server: ${{ secrets.FTP_SERVER }}
+          ftp-username: ${{ secrets.FTP_USERNAME }}
+          ftp-password: ${{ secrets.FTP_PASSWORD }}
+          local-dir: ./dist
+          git-ftp-args: --remote-root /public_html/finance/
