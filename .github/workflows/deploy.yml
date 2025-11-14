@@ -12,19 +12,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Build Project
-        run: |
-          npm install
-          npm run build
+      - name: Install Dependencies
+        run: npm install
 
-          - name: FTP Deploy
-            uses: SamKirkland/FTP-Deploy-Action@4.3.3
-            with:
-            server: admin.aiskoperasi.store
-            username: ${{ secrets.FTP_USERNAME }}
-            password: ${{ secrets.FTP_PASSWORD }}
-            protocol: ftp
-            port: 21
-            local-dir: dist/
-            server-dir: /domains/admin.aiskoperasi.store/public_html/finance/
-        
+      - name: Build Project
+        run: npm run build
+
+      - name: FTP Deploy
+        uses: SamKirkland/FTP-Deploy-Action@4.3.3
+        with:
+          server: admin.aiskoperasi.store
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          protocol: ftp
+          port: 21
+          local-dir: dist/
+          server-dir: /domains/admin.aiskoperasi.store/public_html/finance/
