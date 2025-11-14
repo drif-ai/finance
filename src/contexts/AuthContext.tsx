@@ -1,4 +1,3 @@
-// src/contexts/AuthContext.tsx
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '../services/supabase';
 import type { Session, User } from '@supabase/supabase-js';
@@ -21,7 +20,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        // 1️⃣ Ambil session awal dari Supabase
+        // Ambil session awal
         const fetchSession = async () => {
             try {
                 const { data } = await supabase.auth.getSession();
@@ -51,42 +50,44 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         fetchSession();
 
-        // 2️⃣ Listener untuk login/logout selanjutnya
+        // Listener login/logout
         const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
             setSession(session);
             setUser(session?.user ?? null);
 
             if (session?.user) {
-                const { data: profileData, error } = await supabase
-                    .from('profiles')
-                    .select('*')
-                    .eq('id', session.user.id)
-                    .maybeSingle();
-                if (error) console.error(error);
-                setProfile(profileData ?? null);
+                try {
+                    const { data: profileData, error } = await supabase
+                        .from('profiles')
+                        .select('*')
+                        .eq('id', session.user.id)
+                        .maybeSingle();
+                    if (error) throw error;
+                    setProfile(profileData ?? null);
+                } catch {
+                    setProfile(null);
+                }
             } else {
                 setProfile(null);
             }
         });
 
-        return () => {
-            subscription.unsubscribe();
-        };
+        return () => subscription.unsubscribe();
     }, []);
 
     const signOut = async () => {
         await supabase.auth.signOut();
     };
 
-    const value = { session, user, profile, loading, signOut };
-
-    return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+    return (
+        <AuthContext.Provider value={{ session, user, profile, loading, signOut }}>
+            {children}
+        </AuthContext.Provider>
+    );
 };
 
 export const useAuth = () => {
     const context = useContext(AuthContext);
-    if (!context) {
-        throw new Error('useAuth must be used within an AuthProvider');
-    }
+    if (!context) throw new Error('useAuth must be used within an AuthProvider');
     return context;
 };

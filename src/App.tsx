@@ -8,9 +8,8 @@ import Assets from './features/Assets';
 import Reports from './features/Reports';
 import Settings from './features/Settings';
 import Accounts from './features/Accounts';
-import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Login from './features/Login';
-
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 
 export type Section = 'dashboard' | 'transactions' | 'ledger' | 'accounts' | 'reconciliation' | 'assets' | 'reports' | 'settings';
 
@@ -32,7 +31,14 @@ const AppContent: React.FC = () => {
         }
     }, [activeSection]);
 
-    if (loading) return <div className="flex items-center justify-center min-h-screen text-white">Memuat sesi...</div>;
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center min-h-screen text-white">
+                Memuat sesi...
+            </div>
+        );
+    }
+
     if (!session) return <Login />;
 
     return (
@@ -52,4 +58,3 @@ const App: React.FC = () => (
 );
 
 export default App;
-

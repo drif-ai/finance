@@ -1,0 +1,10 @@
+# Aktifkan rewrite engine
+RewriteEngine On
+RewriteBase /
+
+# Jangan rewrite file atau folder yang ada
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+
+# Semua request lain diarahkan ke index.html
+RewriteRule . /index.html [L]
