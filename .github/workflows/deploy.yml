@@ -17,13 +17,14 @@ jobs:
           npm install
           npm run build
 
-      - name: FTP Deploy
-        uses: SamKirkland/FTP-Deploy-Action@4.3.3
-        with:
-          server: ftp.admin.aiskoperasi.store
-          username: ${{ secrets.FTP_USERNAME }}
-          password: ${{ secrets.FTP_PASSWORD }}
-          protocol: ftp
-          port: 21
-          local-dir: dist/
-          server-dir: /public_html/finance/
+          - name: FTP Deploy
+            uses: SamKirkland/FTP-Deploy-Action@4.3.3
+            with:
+            server: admin.aiskoperasi.store
+            username: ${{ secrets.FTP_USERNAME }}
+            password: ${{ secrets.FTP_PASSWORD }}
+            protocol: ftp
+            port: 21
+            local-dir: dist/
+            server-dir: /domains/admin.aiskoperasi.store/public_html/finance/
+        
