@@ -23,7 +23,7 @@ jobs:
       - name: Build project
         run: npm run build
 
-      - name: Deploy via FTP
+      - name: Deploy to FTP
         uses: SamKirkland/FTP-Deploy-Action@4.3.3
         with:
           server: ${{ secrets.FTP_SERVER }}
