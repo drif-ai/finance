@@ -8,13 +8,14 @@ import Assets from './features/Assets';
 import Reports from './features/Reports';
 import Settings from './features/Settings';
 import Accounts from './features/Accounts';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Login from './features/Login';
-import { useAuth } from './contexts/AuthContext';
+
 
 export type Section = 'dashboard' | 'transactions' | 'ledger' | 'accounts' | 'reconciliation' | 'assets' | 'reports' | 'settings';
 
-const App: React.FC = () => {
-    const { session, profile, loading } = useAuth();
+const AppContent: React.FC = () => {
+    const { session, loading } = useAuth();
     const [activeSection, setActiveSection] = useState<Section>('dashboard');
 
     const renderSection = useCallback(() => {
@@ -31,24 +32,12 @@ const App: React.FC = () => {
         }
     }, [activeSection]);
 
-    if (loading) {
-        return (
-            <div className="flex items-center justify-center min-h-screen text-white">
-                Memuat sesi...
-            </div>
-        );
-    }
-    
-    if (!session) {
-        return <Login />;
-    }
+    if (loading) return <div className="flex items-center justify-center min-h-screen text-white">Memuat sesi...</div>;
+    if (!session) return <Login />;
 
     return (
         <div className="min-h-screen">
-            <Header
-                activeSection={activeSection}
-                setActiveSection={setActiveSection}
-            />
+            <Header activeSection={activeSection} setActiveSection={setActiveSection} />
             <main className="max-w-7xl mx-auto px-4 pb-12">
                 {renderSection()}
             </main>
@@ -56,4 +45,11 @@ const App: React.FC = () => {
     );
 };
 
+const App: React.FC = () => (
+    <AuthProvider>
+        <AppContent />
+    </AuthProvider>
+);
+
 export default App;
+

@@ -1,3 +1,4 @@
+// src/contexts/AuthContext.tsx
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '../services/supabase';
 import type { Session, User } from '@supabase/supabase-js';
@@ -20,36 +21,54 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        // The onAuthStateChange listener fires immediately with the current session state,
-        // which handles both the initial load and subsequent changes.
+        // 1️⃣ Ambil session awal dari Supabase
+        const fetchSession = async () => {
+            try {
+                const { data } = await supabase.auth.getSession();
+                setSession(data.session ?? null);
+                setUser(data.session?.user ?? null);
+
+                if (data.session?.user) {
+                    const { data: profileData, error } = await supabase
+                        .from('profiles')
+                        .select('*')
+                        .eq('id', data.session.user.id)
+                        .maybeSingle();
+                    if (error) throw error;
+                    setProfile(profileData ?? null);
+                } else {
+                    setProfile(null);
+                }
+            } catch (err) {
+                console.error('Error fetching initial session:', err);
+                setSession(null);
+                setUser(null);
+                setProfile(null);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchSession();
+
+        // 2️⃣ Listener untuk login/logout selanjutnya
         const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
             setSession(session);
             setUser(session?.user ?? null);
 
             if (session?.user) {
-                try {
-                    const { data: profileData, error } = await supabase
-                        .from('profiles')
-                        .select('*')
-                        .eq('id', session.user.id)
-                        .maybeSingle();
-
-                    if (error) throw error;
-                    setProfile(profileData);
-
-                } catch (e) {
-                    console.error("Error fetching profile on auth change:", e);
-                    setProfile(null);
-                }
+                const { data: profileData, error } = await supabase
+                    .from('profiles')
+                    .select('*')
+                    .eq('id', session.user.id)
+                    .maybeSingle();
+                if (error) console.error(error);
+                setProfile(profileData ?? null);
             } else {
                 setProfile(null);
             }
-            // The first time this callback runs, the session state is resolved.
-            // We can now safely set loading to false.
-            setLoading(false);
         });
 
-        // Cleanup function to unsubscribe from the listener when the component unmounts.
         return () => {
             subscription.unsubscribe();
         };
@@ -59,20 +78,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         await supabase.auth.signOut();
     };
 
-    const value = {
-        session,
-        user,
-        profile,
-        loading,
-        signOut
-    };
+    const value = { session, user, profile, loading, signOut };
 
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
 
 export const useAuth = () => {
     const context = useContext(AuthContext);
-    if (context === undefined) {
+    if (!context) {
         throw new Error('useAuth must be used within an AuthProvider');
     }
     return context;
