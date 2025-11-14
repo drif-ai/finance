@@ -7,14 +7,13 @@ on:
 
 jobs:
   ftp-deploy:
-    name: Upload to Hostinger
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Install Node
+      - name: Setup Node
         uses: actions/setup-node@v3
         with:
           node-version: 18
@@ -22,14 +21,14 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Build Vite App
+      - name: Build Vite app
         run: npm run build
 
-      - name: Deploy via FTP
+      - name: FTP Deploy
         uses: SamKirkland/FTP-Deploy-Action@v3.1.1
         with:
-          server: ${{ secrets.FTP_SERVER }}
-          username: ${{ secrets.FTP_USERNAME }}
-          password: ${{ secrets.FTP_PASSWORD }}
+          ftp-server: ${{ secrets.FTP_SERVER }}
+          ftp-username: ${{ secrets.FTP_USERNAME }}
+          ftp-password: ${{ secrets.FTP_PASSWORD }}
           local-dir: ./dist
-          server-dir: /public_html/
+          git-ftp-args: "--remote-root /public_html/finance/"
