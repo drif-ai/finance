@@ -20,7 +20,7 @@ jobs:
       - name: FTP Deploy
         uses: SamKirkland/FTP-Deploy-Action@4.3.3
         with:
-          server: ${{ secrets.FTP_SERVER }}
+          server: ftp.admin.aiskoperasi.store
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
           protocol: ftp
