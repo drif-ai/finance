@@ -1,34 +1,33 @@
-name: Deploy to Hostinger FTP
+name: Deploy to Hostinger via FTP
 
 on:
   push:
-    branches:
-      - main
+    branches: ["main"]
 
 jobs:
   ftp-deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Setup Node
+      - name: Install Node
         uses: actions/setup-node@v3
         with:
-          node-version: 18
+          node-version: "18"
 
       - name: Install dependencies
         run: npm install
 
-      - name: Build Vite app
+      - name: Build project
         run: npm run build
 
-      - name: FTP Deploy
+      - name: Deploy via FTP
         uses: SamKirkland/FTP-Deploy-Action@v3.1.1
         with:
           ftp-server: ${{ secrets.FTP_SERVER }}
           ftp-username: ${{ secrets.FTP_USERNAME }}
           ftp-password: ${{ secrets.FTP_PASSWORD }}
           local-dir: ./dist
-          git-ftp-args: "--remote-root /public_html/finance/"
+          git-ftp-args: --remote-root /public_html/finance/
