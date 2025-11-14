@@ -1,13 +1,14 @@
-name: 🚀 Deploy to Hostinger
+name: 🚀 Deploy to Hostinger (Vite React)
 
 on:
   push:
     branches:
-      - main  # berjalan otomatis saat push ke branch main
+      - main
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -17,17 +18,17 @@ jobs:
         with:
           node-version: 18
 
-      - name: Build project
-        run: |
-          cd client
-          npm install
-          npm run build
+      - name: Install dependencies
+        run: npm install
 
-      - name: Deploy via FTP
+      - name: Build Project (Vite)
+        run: npm run build
+
+      - name: Deploy to Hostinger via FTP
         uses: SamKirkland/FTP-Deploy-Action@v4
         with:
           server: ${{ secrets.FTP_SERVER }}
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
-          local-dir: client/dist
+          local-dir: dist
           server-dir: public_html
