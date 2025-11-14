@@ -27,4 +27,4 @@ jobs:
           protocol: ftp
           port: 21
           local-dir: dist/
-          server-dir: domains/admin.aiskoperasi.store/public_html/finance/
+          server-dir: finance/
