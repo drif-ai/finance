@@ -12,7 +12,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Build project
+      - name: Build Project
         run: |
           npm install
           npm run build
@@ -23,5 +23,5 @@ jobs:
           server: ${{ secrets.FTP_SERVER }}
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
-          local-dir: dist
-          server-dir: /public_html/finance
+          local-dir: dist/
+          server-dir: /public_html/finance/
