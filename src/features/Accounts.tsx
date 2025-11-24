@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import Card from '../components/Card';
 import Modal from '../components/Modal';
@@ -291,7 +292,7 @@ const ImportAccountsModal: React.FC<{ isOpen: boolean; onClose: () => void; }> =
 }
 
 const Accounts: React.FC = () => {
-    const { accounts, loading, error, deleteAccount } = useData();
+    const { accounts, loading, error, deleteAccount, transactions } = useData();
     const { profile } = useAuth();
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isImportModalOpen, setIsImportModalOpen] = useState(false);
@@ -306,6 +307,36 @@ const Accounts: React.FC = () => {
     const canEdit = profile?.role === 'admin';
     const canImport = profile?.role === 'admin';
 
+    // CALCULATE REAL-TIME BALANCES FROM TRANSACTIONS
+    // This ensures consistency with Ledger and Reports features.
+    const accountBalances = useMemo(() => {
+        const balances = new Map<string, number>();
+        // Initialize with 0
+        accounts.forEach(acc => balances.set(acc.code, 0));
+
+        // Sum all transactions
+        transactions.forEach(tx => {
+            tx.entries.forEach(entry => {
+                const current = balances.get(entry.account_code) || 0;
+                const account = accounts.find(a => a.code === entry.account_code);
+                
+                if (account) {
+                    // Logic must match Ledger.tsx logic
+                    const isContraAsset = account.type === 'Aset' && account.name.toLowerCase().includes('akumulasi');
+                    // Normal Debit: Assets (non-contra) and Expenses
+                    const isDebitNormal = (account.type === 'Aset' || account.type === 'Beban') && !isContraAsset;
+
+                    const change = isDebitNormal 
+                        ? (entry.debit - entry.credit) 
+                        : (entry.credit - entry.debit);
+                    
+                    balances.set(entry.account_code, current + change);
+                }
+            });
+        });
+        return balances;
+    }, [accounts, transactions]);
+
     const handleOpenModal = (account?: Account) => {
         setEditingAccount(account || null);
         setIsModalOpen(true);
@@ -317,7 +348,10 @@ const Accounts: React.FC = () => {
     };
 
     const handleDelete = async (account: Account) => {
-        if (account.balance !== 0) {
+        // Use calculated balance for check
+        const currentBalance = accountBalances.get(account.code) || 0;
+        
+        if (currentBalance !== 0) {
             alert("Tidak dapat menghapus akun dengan saldo yang tidak nol. Harap transfer saldo ke akun lain terlebih dahulu.");
             return;
         }
@@ -401,25 +435,28 @@ const Accounts: React.FC = () => {
                         </thead>
                         <tbody>
                             {paginatedAccounts.length > 0 ? (
-                                paginatedAccounts.map(acc => (
-                                    <tr key={acc.code} className="border-b border-gray-700 hover:bg-slate-800/50">
-                                        <td className="py-3 px-4 font-mono">{acc.code}</td>
-                                        <td className="py-3 px-4">{acc.name}</td>
-                                        <td className="py-3 px-4 text-gray-300">{acc.type}</td>
-                                        <td className="py-3 px-4 text-right font-mono">{formatCurrency(acc.balance)}</td>
-                                        <td className="py-3 px-4 text-center">
-                                            <button onClick={() => handleOpenModal(acc)} className="text-blue-400 hover:underline text-sm mr-3">{canEdit ? 'Edit' : 'Lihat'}</button>
-                                            {canDelete && <button
-                                                onClick={() => handleDelete(acc)}
-                                                className={`text-sm ${acc.balance !== 0 ? 'text-gray-500 cursor-not-allowed' : 'text-red-400 hover:underline'}`}
-                                                title={acc.balance !== 0 ? "Tidak bisa dihapus karena saldo tidak nol" : "Hapus akun"}
-                                                disabled={acc.balance !== 0}
-                                            >
-                                                Hapus
-                                            </button>}
-                                        </td>
-                                    </tr>
-                                ))
+                                paginatedAccounts.map(acc => {
+                                    const currentBalance = accountBalances.get(acc.code) || 0;
+                                    return (
+                                        <tr key={acc.code} className="border-b border-gray-700 hover:bg-slate-800/50">
+                                            <td className="py-3 px-4 font-mono">{acc.code}</td>
+                                            <td className="py-3 px-4">{acc.name}</td>
+                                            <td className="py-3 px-4 text-gray-300">{acc.type}</td>
+                                            <td className="py-3 px-4 text-right font-mono">{formatCurrency(currentBalance)}</td>
+                                            <td className="py-3 px-4 text-center">
+                                                <button onClick={() => handleOpenModal(acc)} className="text-blue-400 hover:underline text-sm mr-3">{canEdit ? 'Edit' : 'Lihat'}</button>
+                                                {canDelete && <button
+                                                    onClick={() => handleDelete(acc)}
+                                                    className={`text-sm ${currentBalance !== 0 ? 'text-gray-500 cursor-not-allowed' : 'text-red-400 hover:underline'}`}
+                                                    title={currentBalance !== 0 ? "Tidak bisa dihapus karena saldo tidak nol" : "Hapus akun"}
+                                                    disabled={currentBalance !== 0}
+                                                >
+                                                    Hapus
+                                                </button>}
+                                            </td>
+                                        </tr>
+                                    );
+                                })
                             ) : (
                                 <tr>
                                     <td colSpan={5} className="text-center text-gray-400 py-8">

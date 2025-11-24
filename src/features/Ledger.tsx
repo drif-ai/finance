@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useEffect } from 'react';
 import Card from '../components/Card';
 import Pagination from '../components/Pagination';
@@ -26,49 +27,55 @@ const Ledger: React.FC = () => {
         return [...accounts].sort((a, b) => a.code.localeCompare(b.code));
     }, [accounts]);
 
-    const { ledgerEntries, selectedAccount } = useMemo(() => {
+    const { ledgerEntries, selectedAccount, finalBalance } = useMemo(() => {
         if (!selectedAccountCode) {
-            return { ledgerEntries: [], selectedAccount: null };
+            return { ledgerEntries: [], selectedAccount: null, finalBalance: 0 };
         }
 
         const account = accounts.find(acc => acc.code === selectedAccountCode);
         if (!account) {
-            return { ledgerEntries: [], selectedAccount: null };
+            return { ledgerEntries: [], selectedAccount: null, finalBalance: 0 };
         }
         
+        // 1. Ambil semua transaksi terkait akun ini dan urutkan Ascending (Terlama ke Terbaru) untuk perhitungan saldo
         const relevantTransactions = transactions
             .filter(tx => tx.entries.some(e => e.account_code === selectedAccountCode))
             .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
         
-        let runningBalance = account.balance;
+        // 2. Tentukan logika Normal Balance berdasarkan tipe akun
+        // Aset & Beban (Kecuali Akumulasi) = Debit Normal (Debit menambah, Kredit mengurangi)
+        // Lainnya = Kredit Normal (Kredit menambah, Debit mengurangi)
+        const isContraAsset = account.type === 'Aset' && account.name.toLowerCase().includes('akumulasi');
+        const isDebitNormal = (account.type === 'Aset' || account.type === 'Beban') && !isContraAsset;
 
-        const entries: LedgerEntry[] = [];
-        const reversedTransactions = [...relevantTransactions].reverse();
+        let runningBalance = 0; 
+        
+        // 3. Hitung saldo berjalan secara kronologis (Forward Calculation)
+        const calculatedEntries: LedgerEntry[] = relevantTransactions.map(tx => {
+            const entry = tx.entries.find(e => e.account_code === selectedAccountCode)!;
+            
+            // Hitung perubahan berdasarkan posisi normal akun
+            const change = isDebitNormal 
+                ? (entry.debit - entry.credit) 
+                : (entry.credit - entry.debit);
+            
+            runningBalance += change;
 
-        for (const tx of reversedTransactions) {
-            const entry = tx.entries.find(e => e.account_code === selectedAccountCode);
-            if (entry) {
-                const change = entry.debit - entry.credit;
-                const isContraAsset = account.type === 'Aset' && account.name.toLowerCase().includes('akumulasi penyusutan');
-                
-                // Hitung saldo sebelum transaksi ini dengan membalikkan logikanya
-                const balanceBeforeThisTx = ((account.type === 'Aset' || account.type === 'Beban') && !isContraAsset)
-                    ? runningBalance - change // Balikkan akun dengan saldo normal Debit
-                    : runningBalance + change; // Balikkan akun dengan saldo normal Kredit (termasuk kontra-aset)
-                
-                entries.unshift({
-                    ...entry,
-                    date: tx.date,
-                    description: tx.description,
-                    ref: tx.ref,
-                    running_balance: runningBalance,
-                });
+            return {
+                ...entry,
+                date: tx.date,
+                description: tx.description,
+                ref: tx.ref,
+                running_balance: runningBalance,
+            };
+        });
+        
+        // Simpan saldo terakhir hasil perhitungan transaksi
+        const currentCalculatedBalance = runningBalance;
 
-                runningBalance = balanceBeforeThisTx;
-            }
-        }
-
-        const filteredEntries = entries.filter(entry => {
+        // 4. Balik urutan untuk Display (Terbaru di atas) dan Filter
+        // Kita gunakan toReversed() atau spread+reverse
+        const displayEntries = [...calculatedEntries].reverse().filter(entry => {
             const searchLower = searchTerm.toLowerCase();
             const matchesSearch = entry.description.toLowerCase().includes(searchLower) || (entry.ref && entry.ref.toLowerCase().includes(searchLower));
             const matchesStartDate = startDate ? entry.date >= startDate : true;
@@ -76,7 +83,7 @@ const Ledger: React.FC = () => {
             return matchesSearch && matchesStartDate && matchesEndDate;
         });
 
-        return { ledgerEntries: filteredEntries, selectedAccount: account };
+        return { ledgerEntries: displayEntries, selectedAccount: account, finalBalance: currentCalculatedBalance };
     }, [selectedAccountCode, accounts, transactions, searchTerm, startDate, endDate]);
 
     const paginatedLedgerEntries = useMemo(() => {
@@ -163,7 +170,10 @@ const Ledger: React.FC = () => {
                             </div>
                             <div className="text-left md:text-right mt-2 md:mt-0">
                                 <p className="text-gray-400 text-sm">Saldo Akhir (Saat Ini)</p>
-                                <p className="text-2xl font-bold">{formatCurrency(selectedAccount.balance)}</p>
+                                {/* Menggunakan finalBalance hasil perhitungan transaksi agar konsisten dengan tabel */}
+                                <p className="text-2xl font-bold">
+                                    {formatCurrency(finalBalance)}
+                                </p>
                             </div>
                         </div>
                     </Card>

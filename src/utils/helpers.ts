@@ -1,3 +1,4 @@
+
 import type { CompanySettings, TaxSettings, Account, Transaction } from '../types';
 
 export const formatCurrency = (amount: number, currency = 'IDR') => {
@@ -156,7 +157,7 @@ export const calculatePeriodFinancials = (accounts: Account[], transactions: Tra
     const liabilities = accounts.filter(a => a.type === 'Liabilitas').map(a => ({...a, balance: -(closingBalances.get(a.code) || 0)}));
     const equity = accounts.filter(a => a.type === 'Modal').map(a => ({...a, balance: -(closingBalances.get(a.code) || 0)}));
     
-    // FIX: Calculate prior period Profit/Loss and add it to the current period's net income
+    // Calculate prior period Profit/Loss and add it to the current period's net income
     // to get the correct Retained Earnings for the balance sheet.
     const priorPeriodPL = -accounts
         .filter(a => a.type === 'Pendapatan' || a.type === 'Beban')
@@ -165,7 +166,12 @@ export const calculatePeriodFinancials = (accounts: Account[], transactions: Tra
     // Add both prior P/L and current net income to retained earnings
     const equityWithPL = equity.map(a => a.code === '3200' ? {...a, balance: a.balance + priorPeriodPL + netIncome} : a);
 
-    const totalAssets = assets.reduce((s, a) => s + (a.name.toLowerCase().includes('akumulasi') ? -(a.balance) : a.balance), 0);
+    // FIX: Total Assets calculation
+    // Previously, manual negation caused double negatives for contra-assets.
+    // closingBalances are (Debit - Credit). Contra assets are naturally negative here.
+    // Summing them correctly reduces the Total Assets.
+    const totalAssets = assets.reduce((s, a) => s + a.balance, 0);
+
     const totalLiabilities = liabilities.reduce((s, a) => s + a.balance, 0);
     const totalEquity = equity.reduce((s, a) => s + a.balance, 0);
     const totalEquityWithPL = equityWithPL.reduce((s, a) => s + a.balance, 0);
