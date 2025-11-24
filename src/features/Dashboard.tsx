@@ -12,9 +12,10 @@ const getYearRange = () => {
     return { start, end };
 };
 
+type CardColor = 'green' | 'red' | 'blue' | 'purple';
 
-const SummaryCard: React.FC<{ title: string; value: number; icon: string; color: string }> = ({ title, value, icon, color }) => {
-    const colorClasses = {
+const SummaryCard: React.FC<{ title: string; value: number; icon: string; color: CardColor }> = ({ title, value, icon, color }) => {
+    const colorClasses: Record<CardColor, string> = {
         green: 'text-green-400 bg-green-500/20',
         red: 'text-red-400 bg-red-500/20',
         blue: 'text-blue-400 bg-blue-500/20',
@@ -53,6 +54,34 @@ const RecentTransactions: React.FC<{ transactions: Transaction[] }> = ({ transac
             )) : (
                 <div className="text-center text-gray-400 py-6">Belum ada transaksi pada periode ini.</div>
             )}
+        </div>
+        <div className="hidden md:block overflow-x-auto -mx-4 md:mx-0">
+             <table className="w-full min-w-[600px]">
+                <thead>
+                    <tr className="border-b border-gray-600">
+                        <th className="text-left py-2 md:py-3 px-2 md:px-4 text-sm md:text-base">Tanggal</th>
+                        <th className="text-left py-2 md:py-3 px-2 md:px-4 text-sm md:text-base">Deskripsi</th>
+                        <th className="text-right py-2 md:py-3 px-2 md:px-4 text-sm md:text-base">Jumlah</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {recentTxs.length > 0 ? (
+                        recentTxs.map(tx => (
+                            <tr key={tx.id} className="border-b border-gray-700 last:border-b-0">
+                                <td className="py-2 md:py-3 px-2 md:px-4 text-gray-300 text-sm md:text-base">{formatDate(tx.date)}</td>
+                                <td className="py-2 md:py-3 px-2 md:px-4 text-gray-300 text-sm md:text-base">{tx.description}</td>
+                                <td className="py-2 md:py-3 px-2 md:px-4 text-right text-sm md:text-base font-mono">
+                                    {formatCurrency(tx.entries.reduce((sum, entry) => sum + entry.debit, 0))}
+                                </td>
+                            </tr>
+                        ))
+                    ) : (
+                        <tr className="border-b border-gray-700">
+                            <td className="py-3 px-4 text-gray-300 text-center" colSpan={3}>Belum ada transaksi pada periode ini.</td>
+                        </tr>
+                    )}
+                </tbody>
+            </table>
         </div>
     </Card>
 )};
