@@ -1,13 +1,19 @@
-# Aktifkan rewrite engine
+# Enable rewrite engine
 RewriteEngine On
-RewriteBase /
 
-# Jangan rewrite file atau folder yang ada
-RewriteCond %{REQUEST_FILENAME} !-f
-RewriteCond %{REQUEST_FILENAME} !-d
+# Base directory for the app
+RewriteBase /finance/
 
-# Izinkan file langsung diakses
-RewriteRule ^(.*\.(js|css|png|jpg|jpeg|gif|svg|ico|json|txt|map))$ $1 [L]
+# Allow direct access to existing files and folders
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
 
-# Semua rute jatuh ke index.html
-RewriteRule ^.*$ /index.html [L]
+# Allow static assets
+RewriteRule ^(.*\.(js|css|png|jpg|jpeg|gif|svg|ico|json|txt|map|webp|woff|woff2))$ $1 [L]
+
+# Redirect all routes to the SPA entry point
+RewriteRule ^ /finance/index.html [L]
+
+# Ensure service worker is accessible from the correct scope
+RewriteRule ^service-worker\.js$ /finance/service-worker.js [L]
