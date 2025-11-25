@@ -1,0 +1,13 @@
+# Aktifkan rewrite engine
+RewriteEngine On
+RewriteBase /
+
+# Jangan rewrite file atau folder yang ada
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+
+# Izinkan file langsung diakses
+RewriteRule ^(.*\.(js|css|png|jpg|jpeg|gif|svg|ico|json|txt|map))$ $1 [L]
+
+# Semua rute jatuh ke index.html
+RewriteRule ^.*$ /index.html [L]
