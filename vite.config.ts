@@ -6,6 +6,12 @@ export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
     return {
       base: '/finance/',
+      build: {
+        rollupOptions: {
+          input: 'index.html'
+        },
+        copyPublicDir: true
+      },
       server: {
         port: 3000,
         host: '0.0.0.0',
