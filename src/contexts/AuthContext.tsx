@@ -1,93 +1,112 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { supabase } from '../services/supabase';
-import type { Session, User } from '@supabase/supabase-js';
-import type { Profile } from '../types';
+import React, { createContext, useContext, useState, useEffect } from "react";
+import { supabase } from "../services/supabase";
+import type { Session, User } from "@supabase/supabase-js";
+import type { Profile } from "../types";
 
 interface AuthContextType {
-    session: Session | null;
-    user: User | null;
-    profile: Profile | null;
-    loading: boolean;
-    signOut: () => Promise<void>;
+  session: Session | null;
+  user: User | null;
+  profile: Profile | null;
+  loading: boolean;
+  signOut: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-    const [session, setSession] = useState<Session | null>(null);
-    const [user, setUser] = useState<User | null>(null);
-    const [profile, setProfile] = useState<Profile | null>(null);
-    const [loading, setLoading] = useState(true);
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
+  children,
+}) => {
+  const [session, setSession] = useState<Session | null>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [loading, setLoading] = useState(true);
 
-    useEffect(() => {
-        // Ambil session awal
-        const fetchSession = async () => {
-            try {
-                const { data } = await supabase.auth.getSession();
-                setSession(data.session ?? null);
-                setUser(data.session?.user ?? null);
+  // -------------------------------------------------------------------
+  // GET PROFILE — dibuat fungsi terpisah agar aman dari race-condition
+  // -------------------------------------------------------------------
+  const loadProfile = async (userId: string) => {
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", userId)
+      .maybeSingle();
 
-                if (data.session?.user) {
-                    const { data: profileData, error } = await supabase
-                        .from('profiles')
-                        .select('*')
-                        .eq('id', data.session.user.id)
-                        .maybeSingle();
-                    if (error) throw error;
-                    setProfile(profileData ?? null);
-                } else {
-                    setProfile(null);
-                }
-            } catch (err) {
-                console.error('Error fetching initial session:', err);
-                setSession(null);
-                setUser(null);
-                setProfile(null);
-            } finally {
-                setLoading(false);
-            }
-        };
+    if (error) return null;
+    return data ?? null;
+  };
 
-        fetchSession();
+  // -------------------------------------------------------------------
+  // LOAD INITIAL SESSION — hanya dijalankan sekali
+  // -------------------------------------------------------------------
+  useEffect(() => {
+    let mounted = true;
 
-        // Listener login/logout
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-            setSession(session);
-            setUser(session?.user ?? null);
+    const initSession = async () => {
+      const { data } = await supabase.auth.getSession();
+      const current = data.session;
 
-            if (session?.user) {
-                try {
-                    const { data: profileData, error } = await supabase
-                        .from('profiles')
-                        .select('*')
-                        .eq('id', session.user.id)
-                        .maybeSingle();
-                    if (error) throw error;
-                    setProfile(profileData ?? null);
-                } catch {
-                    setProfile(null);
-                }
-            } else {
-                setProfile(null);
-            }
-        });
+      if (!mounted) return;
 
-        return () => subscription.unsubscribe();
-    }, []);
+      setSession(current);
+      setUser(current?.user ?? null);
 
-    const signOut = async () => {
-        await supabase.auth.signOut();
+      if (current?.user) {
+        setProfile(await loadProfile(current.user.id));
+      }
+
+      setLoading(false);
     };
 
-    return (
-        <AuthContext.Provider value={{ session, user, profile, loading, signOut }}>
-            {children}
-        </AuthContext.Provider>
-    );
+    initSession();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  // -------------------------------------------------------------------
+  // AUTH LISTENER — lebih stabil, tidak memicu refresh berulang
+  // -------------------------------------------------------------------
+  useEffect(() => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
+      setSession(newSession);
+      setUser(newSession?.user ?? null);
+
+      if (newSession?.user) {
+        const profileData = await loadProfile(newSession.user.id);
+        setProfile(profileData);
+      } else {
+        setProfile(null);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const signOut = async () => {
+    await supabase.auth.signOut();
+    setSession(null);
+    setUser(null);
+    setProfile(null);
+  };
+
+  const value: AuthContextType = {
+    session,
+    user,
+    profile,
+    loading,
+    signOut,
+  };
+
+  return (
+    <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
+  );
 };
 
 export const useAuth = () => {
-    const context = useContext(AuthContext);
-    if (!context) throw new Error('useAuth must be used within an AuthProvider');
-    return context;
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error("useAuth must be used within an AuthProvider");
+  return ctx;
 };

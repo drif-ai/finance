@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import type { Account, Transaction, Asset, CompanySettings, TaxSettings, JournalEntry } from '../types';
 import { defaultCompanySettings, defaultTaxSettings, getTodayDateString, CACHE_KEYS, loadFromCache, saveToCache } from '../utils/helpers';
 import { supabase } from '../services/supabase';
@@ -49,17 +49,17 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
-    const getCacheKey = (baseKey: string) => {
-        const userId = session?.user?.id;
-        if (!userId) return null;
-        return `${baseKey}_${userId}`;
+    const revalidateLock = useRef(false);
+    const lastRealtimeCall = useRef(0);
+
+    // UTIL → generate per user cache key
+    const getCacheKey = (key: string) => {
+        if (!session?.user?.id) return null;
+        return `${key}_${session.user.id}`;
     };
 
     useEffect(() => {
-        if (authLoading) {
-            setLoading(true);
-            return;
-        }
+        if (authLoading) return;
 
         if (!session) {
             setAccounts([]);
@@ -80,10 +80,25 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setAssets(loadFromCache(`${CACHE_KEYS.ASSETS}_${userId}`, []));
         setCompanySettings(loadFromCache(`${CACHE_KEYS.COMPANY_SETTINGS}_${userId}`, defaultCompanySettings));
         setTaxSettings(loadFromCache(`${CACHE_KEYS.TAX_SETTINGS}_${userId}`, defaultTaxSettings));
-        setLoading(cachedAccounts.length === 0 && cachedTransactions.length === 0);
+        const initialCacheEmpty =
+            accounts.length === 0 &&
+            transactions.length === 0;
 
+        if (initialCacheEmpty) setLoading(true);
+
+
+        // ============================================================
+        // FUNCTION: REVALIDATE (THROTTLED)
+        // ============================================================
         const revalidate = async () => {
+            const now = Date.now();
+            if (revalidateLock.current) return;
+            if (now - lastRealtimeCall.current < 500) return; // throttle 0.5s
+
+            revalidateLock.current = true;
+            lastRealtimeCall.current = now;
             setError(null);
+
             try {
                 const accountsPromise = supabase.from('accounts').select('*').order('code');
                 const transactionsPromise = supabase.from('transactions').select('*, journal_entries(*)').order('date', { ascending: false });
@@ -126,9 +141,10 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 }
 
             } catch (err: any) {
-                console.error("Gagal sinkronisasi data:", err);
-                setError(`Gagal sinkronisasi data: ${err.message}`);
+                console.error("Revalidate error:", err);
+                setError(`Gagal sinkronisasi: ${err.message}`);
             } finally {
+                revalidateLock.current = false;
                 setLoading(false);
             }
         };

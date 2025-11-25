@@ -6,5 +6,8 @@ RewriteBase /
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 
-# Semua request lain diarahkan ke index.html
-RewriteRule . /index.html [L]
+# Izinkan file langsung diakses
+RewriteRule ^(.*\.(js|css|png|jpg|jpeg|gif|svg|ico|json|txt|map))$ $1 [L]
+
+# Semua rute jatuh ke index.html
+RewriteRule ^.*$ /index.html [L]
