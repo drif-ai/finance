@@ -1,45 +1,61 @@
-// service-worker.js
-// Basic PWA caching strategy for Vite
+const CACHE_NAME = 'financeflow-pro-cache-v4';
+const BASE = '/finance/';
 
-const CACHE_NAME = "app-cache-v1";
-const ASSETS = [
-  "/",
-  "/index.html",
-  "/manifest.webmanifest",
-  // Vite will handle hashed assets automatically; add static assets here if needed.
+const urlsToCache = [
+  BASE,
+  BASE + 'index.html',
+  BASE + 'manifest.json',
 ];
 
-self.addEventListener("install", (event) => {
+self.addEventListener('install', event => {
+  self.skipWaiting();
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS);
+    caches.open(CACHE_NAME).then(cache => {
+      console.log('Opened cache and caching app shell');
+      return cache.addAll(urlsToCache);
     })
   );
 });
 
-self.addEventListener("activate", (event) => {
+self.addEventListener('fetch', event => {
+  if (event.request.method !== 'GET') return;
+
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request).catch(() => caches.match(BASE + 'index.html'))
+    );
+    return;
+  }
+
+  event.respondWith(
+    caches.match(event.request).then(cachedResponse => {
+      if (cachedResponse) return cachedResponse;
+
+      return fetch(event.request).then(networkResponse => {
+        const clone = networkResponse.clone();
+        caches.open(CACHE_NAME).then(cache => {
+          if (networkResponse.ok && networkResponse.type !== 'opaque') {
+            cache.put(event.request, clone);
+          }
+        });
+        return networkResponse;
+      });
+    })
+  );
+});
+
+self.addEventListener('activate', event => {
+  const whitelist = [CACHE_NAME];
   event.waitUntil(
-    caches.keys().then((keys) =>
+    caches.keys().then(names =>
       Promise.all(
-        keys.map((key) => {
-          if (key !== CACHE_NAME) {
-            return caches.delete(key);
+        names.map(name => {
+          if (!whitelist.includes(name)) {
+            console.log('Deleting old cache:', name);
+            return caches.delete(name);
           }
         })
       )
     )
-  );
-});
-
-self.addEventListener("fetch", (event) => {
-  event.respondWith(
-    caches.match(event.request).then((cached) => {
-      return (
-        cached ||
-        fetch(event.request).catch(() => {
-          return caches.match("/index.html");
-        })
-      );
-    })
   );
 });
